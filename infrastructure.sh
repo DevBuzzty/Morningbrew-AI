@@ -79,12 +79,12 @@ gcloud run jobs deploy $JOB_NAME \
     --max-retries 0 \
     --task-timeout 1200s # 20 minutes
 
-# 8. Create Cloud Scheduler Trigger (7:00 AM CET)
+# 8. Create Cloud Scheduler Trigger (6:00 AM CET)
 echo "Creating Cloud Scheduler trigger..."
-# Note: 7:00 AM CET is handled by the Europe/Berlin timezone.
+# Note: 6:00 AM CET is handled by the Europe/Berlin timezone.
 gcloud scheduler jobs create run ${JOB_NAME}-trigger \
     --location $REGION \
-    --schedule="0 7 * * *" \
+    --schedule="0 6 * * *" \
     --time-zone="Europe/Berlin" \
     --job $JOB_NAME
 
