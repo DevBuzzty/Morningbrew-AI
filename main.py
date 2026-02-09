@@ -1,11 +1,12 @@
 import os
+import io
 import json
 import logging
 import base64
 from datetime import datetime, timedelta
 import requests
 import vertexai
-from vertexai.generative_models import GenerativeModel, ResponseSchema, GenerationConfig
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import texttospeech
 from google.cloud import storage
 from google.cloud import secretmanager
@@ -86,44 +87,47 @@ def fetch_news():
     return "\n".join(news_summary)
 
 def generate_script(news_content):
-    """Generates a podcast script using Gemini 1.5 Pro."""
-    logger.info("Generating script with Gemini 1.5 Pro...")
+    """Generates a podcast script using Gemini 1.5 Pro with System Instructions."""
+    logger.info("Generating script with Gemini 1.5 Pro (System Instructions)...")
     vertexai.init(project=PROJECT_ID, location=REGION)
-    model = GenerativeModel("gemini-1.5-pro")
+
+    system_instruction = """
+Du bist ein erstklassiger Podcast-Redakteur für das Format "Daily Briefing".
+Deine Aufgabe ist es, ein Skript für ein 15-20 minütiges Gespräch (ca. 2000-2500 Wörter) zu erstellen.
+
+Sprecher-Profile:
+1. Jules: Weiblich, KI-Expertin, Tech-Optimistin. Sie spricht mit Begeisterung, nutzt moderne Begriffe, ist energiegeladen und sieht in fast jedem Problem eine technologische Lösung.
+2. Basti: Männlich, Journalist alter Schule, kritischer Beobachter. Er hinterfragt den Hype, sorgt sich um Datenschutz, Ethik und soziale Auswirkungen. Er ist nicht technikfeindlich, aber sehr skeptisch.
+
+Gesprächsdynamik:
+- Die beiden sollen INTERAGIEREN, nicht nur nacheinander vorlesen.
+- Basti darf Jules sanft unterbrechen oder ihre Begeisterung hinterfragen.
+- Jules versucht Basti mit Fakten zu überzeugen.
+- Nutze natürliche Füllwörter (äh, weißt du, na ja) sehr sparsam, um das Skript lebendig zu machen.
+- Sprache: Deutsch. Tonfall: Professionell, aber sehr konversationsorientiert (wie ein echtes Gespräch unter Kollegen).
+
+Struktur: Intro -> Politik -> Wirtschaft -> Deep Dive Tech/AI -> Outro.
+Ausgabeformat: Ein JSON-Array von Objekten mit "speaker" ("Jules" oder "Basti") und "text".
+"""
+
+    model = GenerativeModel(
+        "gemini-1.5-pro",
+        system_instruction=[system_instruction]
+    )
 
     prompt = f"""
-Du bist ein erfahrener Redakteur für einen täglichen Nachrichten-Podcast.
-Erstelle ein Skript für eine 15-20 minütige Podcast-Folge (ca. 2000-2500 Wörter).
-Die Sprecher sind:
-1. Jules: Eine KI-Enthusiastin, optimistisch, energiegeladen, liebt Technologie.
-2. Basti: Ein kritischer Beobachter, hinterfragt Dinge, achtet auf soziale und ethische Auswirkungen, eher ruhig.
-
-Struktur des Podcasts:
-- Intro: Begrüßung und Überblick.
-- Politik: Aktuelle Themen aus Deutschland und der Welt.
-- Wirtschaft: Wichtige wirtschaftliche Entwicklungen.
-- Deep Dive AI/Tech: Ein tieferer Blick in die neuesten technologischen Trends.
-- Outro: Verabschiedung.
-
-Tonfall: Professionell aber locker und konversationsorientiert, wie "NotebookLM Audio Overview".
-Sprache: Deutsch.
-
-Hier sind die heutigen Nachrichten-Headlines als Basis:
+Hier sind die heutigen Nachrichten-Headlines:
 {news_content}
 
-Gib das Skript AUSSCHLIESSLICH als ein valides JSON-Array von Objekten zurück.
-Jedes Objekt muss die Felder "speaker" ("Jules" oder "Basti") und "text" (der gesprochene Text) enthalten.
-Beispiel:
-[
-  {{"speaker": "Jules", "text": "Hallo und willkommen zum täglichen Briefing!"}},
-  {{"speaker": "Basti", "text": "Hallo Jules. Mal sehen, was die Welt heute für uns bereit hält."}}
-]
+Erstelle basierend auf diesen Informationen das Podcast-Skript. Achte darauf, dass das Gespräch flüssig ist und Jules und Basti wirklich miteinander debattieren, besonders im AI Deep Dive.
+Ziele auf eine Wortzahl von insgesamt 2000-2500 Wörtern ab.
 """
 
     response = model.generate_content(
         prompt,
         generation_config={
             "response_mime_type": "application/json",
+            "temperature": 0.8,
         }
     )
 
@@ -155,8 +159,6 @@ def synthesize_audio(script_segments):
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.MP3
     )
-
-    import io
 
     for segment in script_segments:
         speaker = segment.get("speaker")
