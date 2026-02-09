@@ -2,6 +2,12 @@
 
 # Configuration - Replace these or set them as environment variables
 PROJECT_ID=$(gcloud config get-value project)
+
+if [ -z "$PROJECT_ID" ]; then
+    echo "ERROR: No Google Cloud project detected. Please run 'gcloud config set project YOUR_PROJECT_ID' first."
+    exit 1
+fi
+
 REGION="europe-west3"
 BUCKET_NAME="${PROJECT_ID}-morning-briefing-podcasts"
 SERVICE_ACCOUNT_NAME="podcast-generator-sa"
