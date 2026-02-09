@@ -2,7 +2,6 @@ import os
 import io
 import json
 import logging
-import base64
 from datetime import datetime, timedelta
 import requests
 import google.generativeai as genai
