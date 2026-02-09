@@ -5,8 +5,7 @@ import logging
 import base64
 from datetime import datetime, timedelta
 import requests
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+import google.generativeai as genai
 from google.cloud import texttospeech
 from google.cloud import storage
 from google.cloud import secretmanager
@@ -24,6 +23,7 @@ REGION = os.getenv("GCP_REGION", "europe-west3")
 BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 SENDGRID_API_KEY_SECRET_NAME = os.getenv("SENDGRID_API_KEY_SECRET_NAME")
 NEWS_API_KEY_SECRET_NAME = os.getenv("NEWS_API_KEY_SECRET_NAME")
+GOOGLE_API_KEY_SECRET_NAME = os.getenv("GOOGLE_API_KEY_SECRET_NAME")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 
@@ -87,9 +87,11 @@ def fetch_news():
     return "\n".join(news_summary)
 
 def generate_script(news_content):
-    """Generates a podcast script using Gemini 1.5 Pro with System Instructions."""
-    logger.info("Generating script with Gemini 1.5 Pro (System Instructions)...")
-    vertexai.init(project=PROJECT_ID, location=REGION)
+    """Generates a podcast script using Google AI Studio (Gemini API) with System Instructions."""
+    logger.info("Generating script with Google AI Studio (Gemini 1.5 Pro)...")
+
+    api_key = get_secret(GOOGLE_API_KEY_SECRET_NAME)
+    genai.configure(api_key=api_key)
 
     system_instruction = """
 Du bist ein erstklassiger Podcast-Redakteur für das Format "Daily Briefing".
@@ -110,9 +112,9 @@ Struktur: Intro -> Politik -> Wirtschaft -> Deep Dive Tech/AI -> Outro.
 Ausgabeformat: Ein JSON-Array von Objekten mit "speaker" ("Jules" oder "Basti") und "text".
 """
 
-    model = GenerativeModel(
-        "gemini-1.5-pro",
-        system_instruction=[system_instruction]
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-pro",
+        system_instruction=system_instruction
     )
 
     prompt = f"""
@@ -125,10 +127,10 @@ Ziele auf eine Wortzahl von insgesamt 2000-2500 Wörtern ab.
 
     response = model.generate_content(
         prompt,
-        generation_config={
-            "response_mime_type": "application/json",
-            "temperature": 0.8,
-        }
+        generation_config=genai.GenerationConfig(
+            response_mime_type="application/json",
+            temperature=0.8,
+        )
     )
 
     try:
@@ -249,7 +251,8 @@ def main():
         # Check required env vars
         required_vars = [
             "GCP_PROJECT", "GCS_BUCKET_NAME", "RECIPIENT_EMAIL",
-            "SENDER_EMAIL", "SENDGRID_API_KEY_SECRET_NAME", "NEWS_API_KEY_SECRET_NAME"
+            "SENDER_EMAIL", "SENDGRID_API_KEY_SECRET_NAME",
+            "NEWS_API_KEY_SECRET_NAME", "GOOGLE_API_KEY_SECRET_NAME"
         ]
         missing = [v for v in required_vars if not os.getenv(v)]
         if missing:
