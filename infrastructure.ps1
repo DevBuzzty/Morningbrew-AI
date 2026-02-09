@@ -18,7 +18,8 @@ gcloud services enable `
     secretmanager.googleapis.com `
     run.googleapis.com `
     cloudscheduler.googleapis.com `
-    cloudbuild.googleapis.com
+    cloudbuild.googleapis.com `
+    artifactregistry.googleapis.com
 
 # 2. Create Service Account
 Write-Host "Creating service account..." -ForegroundColor Yellow
@@ -42,13 +43,13 @@ foreach ($ROLE in $ROLES) {
 
 # 4. Create GCS Bucket
 Write-Host "Creating GCS bucket..." -ForegroundColor Yellow
-gsutil mb -l $REGION gs://$BUCKET_NAME/
+gsutil mb -l $REGION gs://$BUCKET_NAME/ 2>$null
 
 # 5. Create Secrets in Secret Manager (Placeholders)
 Write-Host "Creating secrets (placeholders)..." -ForegroundColor Yellow
-gcloud secrets create NEWS_API_KEY --replication-policy="automatic"
-gcloud secrets create SENDGRID_API_KEY --replication-policy="automatic"
-gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic"
+gcloud secrets create NEWS_API_KEY --replication-policy="automatic" 2>$null
+gcloud secrets create SENDGRID_API_KEY --replication-policy="automatic" 2>$null
+gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic" 2>$null
 
 Write-Host "IMPORTANT: Please add your API keys to the secrets using these commands:" -ForegroundColor Magenta
 Write-Host "echo -n 'YOUR_NEWS_API_KEY' | gcloud secrets versions add NEWS_API_KEY --data-file=-"
@@ -61,7 +62,7 @@ $REPO_NAME = "podcast-repo"
 gcloud artifacts repositories create $REPO_NAME `
     --repository-format=docker `
     --location=$REGION `
-    --description="Repository for Podcast Generator images"
+    --description="Repository for Podcast Generator images" 2>$null
 
 # 7. Build and Deploy Cloud Run Job
 Write-Host "Building and deploying Cloud Run Job..." -ForegroundColor Yellow

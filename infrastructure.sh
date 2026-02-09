@@ -20,7 +20,8 @@ gcloud services enable \
     secretmanager.googleapis.com \
     run.googleapis.com \
     cloudscheduler.googleapis.com \
-    cloudbuild.googleapis.com
+    cloudbuild.googleapis.com \
+    artifactregistry.googleapis.com
 
 # 2. Create Service Account
 echo "Creating service account..."
@@ -44,7 +45,7 @@ done
 
 # 4. Create GCS Bucket
 echo "Creating GCS bucket..."
-gsutil mb -l $REGION gs://$BUCKET_NAME/
+gsutil mb -l $REGION gs://$BUCKET_NAME/ || true
 
 # 5. Create Secrets in Secret Manager (Placeholders)
 echo "Creating secrets (placeholders)..."
