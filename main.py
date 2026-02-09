@@ -28,15 +28,24 @@ SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 
 def get_secret(secret_name):
     """Fetches a secret from Google Cloud Secret Manager."""
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{PROJECT_ID}/secrets/{secret_name}/versions/latest"
-    response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
+    try:
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{PROJECT_ID}/secrets/{secret_name}/versions/latest"
+        response = client.access_secret_version(request={"name": name})
+        secret = response.payload.data.decode("UTF-8").strip()
+        logger.info(f"Successfully retrieved secret: {secret_name} (length: {len(secret)})")
+        return secret
+    except Exception as e:
+        logger.error(f"Failed to retrieve secret {secret_name}: {e}")
+        raise
 
 def fetch_news():
     """Fetches real-time news headlines using NewsAPI.org."""
     logger.info("Fetching news from NewsAPI...")
     api_key = get_secret(NEWS_API_KEY_SECRET_NAME)
+    if not api_key:
+        logger.error("NewsAPI key is empty!")
+        return ""
     base_url = "https://newsapi.org/v2/top-headlines"
 
     news_summary = []
@@ -90,7 +99,11 @@ def generate_script(news_content):
     logger.info("Generating script with Google AI Studio (Gemini 1.5 Pro)...")
 
     api_key = get_secret(GOOGLE_API_KEY_SECRET_NAME)
-    genai.configure(api_key=api_key)
+    if not api_key:
+        raise ValueError("Google API Key is missing or empty!")
+
+    # Using transport='rest' to avoid gRPC 'Illegal metadata' errors in some Cloud environments
+    genai.configure(api_key=api_key, transport='rest')
 
     system_instruction = """
 Du bist ein erstklassiger Podcast-Redakteur für das Format "Daily Briefing".
