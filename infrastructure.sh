@@ -41,6 +41,7 @@ ROLES=(
     "roles/storage.objectAdmin"
     "roles/texttospeech.admin"
     "roles/iam.serviceAccountTokenCreator"
+    "roles/run.jobRunner"
 )
 
 for ROLE in "${ROLES[@]}"; do
@@ -93,10 +94,12 @@ gcloud run jobs deploy $JOB_NAME \
 # 8. Create Cloud Scheduler Trigger (6:00 AM CET)
 echo "Creating Cloud Scheduler trigger..."
 # Note: 6:00 AM CET is handled by the Europe/Berlin timezone.
-gcloud scheduler jobs create run ${JOB_NAME}-trigger \
+gcloud scheduler jobs create http ${JOB_NAME}-trigger \
     --location $REGION \
     --schedule="0 6 * * *" \
     --time-zone="Europe/Berlin" \
-    --job $JOB_NAME
+    --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/${JOB_NAME}:run" \
+    --http-method POST \
+    --oauth-service-account-email "${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 echo "Deployment complete!"
