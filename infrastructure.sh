@@ -29,6 +29,9 @@ gcloud services enable \
     cloudbuild.googleapis.com \
     artifactregistry.googleapis.com
 
+echo "Waiting for APIs to propagate..."
+sleep 30
+
 # 2. Create Service Account
 echo "Creating service account..."
 gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME \

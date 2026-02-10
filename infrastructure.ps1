@@ -27,6 +27,9 @@ gcloud services enable `
     cloudbuild.googleapis.com `
     artifactregistry.googleapis.com
 
+Write-Host "Waiting for APIs to propagate..." -ForegroundColor Yellow
+Start-Sleep -Seconds 30
+
 # 2. Create Service Account
 Write-Host "Creating service account..." -ForegroundColor Yellow
 gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME `

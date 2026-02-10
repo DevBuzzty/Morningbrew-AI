@@ -100,7 +100,7 @@ def generate_script(news_content):
     """Generates a podcast script using Vertex AI (Gemini 1.5 Flash) with System Instructions."""
     logger.info("Generating script with Vertex AI (Gemini 1.5 Flash)...")
 
-    # We use us-central1 for the AI call because Gemini 1.5 Flash is guaranteed to be available there.
+    # We use us-central1 for the AI call because Gemini is guaranteed to be available there.
     # The rest of the app (Storage, TTS) stays in your local region.
     vertexai.init(project=PROJECT_ID, location="us-central1")
 
@@ -123,8 +123,9 @@ Struktur: Intro -> Politik -> Wirtschaft -> Deep Dive Tech/AI -> Outro.
 Ausgabeformat: Ein JSON-Array von Objekten mit "speaker" ("Jules" oder "Basti") und "text".
 """
 
+    # We use 'gemini-1.5-flash' as the most widely available stable alias.
     model = GenerativeModel(
-        model_name="gemini-1.5-flash-002",
+        model_name="gemini-1.5-flash",
         system_instruction=system_instruction
     )
 
@@ -136,22 +137,26 @@ Erstelle basierend auf diesen Informationen das Podcast-Skript. Achte darauf, da
 Ziele auf eine Wortzahl von insgesamt 2000-2500 Wörtern ab.
 """
 
-    response = model.generate_content(
-        prompt,
-        generation_config=GenerationConfig(
-            response_mime_type="application/json",
-            temperature=0.8,
-        )
-    )
-
-    try:
-        script = json.loads(response.text)
-        return script
-    except Exception as e:
-        logger.error(f"Failed to parse Gemini response as JSON: {e}")
-        logger.debug(f"Raw response: {response.text}")
-        # Fallback: simple text parsing or error
-        raise
+    import time
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(
+                prompt,
+                generation_config=GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0.8,
+                )
+            )
+            script = json.loads(response.text)
+            return script
+        except Exception as e:
+            logger.warning(f"AI generation attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(5)
+            else:
+                logger.error("All AI generation attempts failed.")
+                raise
 
 def synthesize_audio(script_segments):
     """Synthesizes audio from script segments and stitches them."""
