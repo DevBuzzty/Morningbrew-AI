@@ -18,7 +18,7 @@ Write-Host "Starting deployment for project: $PROJECT_ID in region: $REGION" -Fo
 # 1. Enable APIs
 Write-Host "Enabling necessary APIs..." -ForegroundColor Yellow
 gcloud services enable `
-    generativelanguage.googleapis.com `
+    aiplatform.googleapis.com `
     texttospeech.googleapis.com `
     storage.googleapis.com `
     secretmanager.googleapis.com `
@@ -35,6 +35,7 @@ gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME `
 # 3. Assign Roles to Service Account
 Write-Host "Assigning roles to service account..." -ForegroundColor Yellow
 $ROLES = @(
+    "roles/aiplatform.user",
     "roles/secretmanager.secretAccessor",
     "roles/storage.objectAdmin",
     "roles/texttospeech.admin",
@@ -56,12 +57,9 @@ gsutil mb -l $REGION gs://$BUCKET_NAME/ 2>$null
 Write-Host "Creating secrets (placeholders)..." -ForegroundColor Yellow
 gcloud secrets create NEWS_API_KEY --replication-policy="automatic" 2>$null
 gcloud secrets create SENDGRID_API_KEY --replication-policy="automatic" 2>$null
-gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic" 2>$null
-
 Write-Host "IMPORTANT: Please add your API keys to the secrets using these commands:" -ForegroundColor Magenta
 Write-Host "echo -n 'YOUR_NEWS_API_KEY' | gcloud secrets versions add NEWS_API_KEY --data-file=-"
 Write-Host "echo -n 'YOUR_SENDGRID_API_KEY' | gcloud secrets versions add SENDGRID_API_KEY --data-file=-"
-Write-Host "echo -n 'YOUR_GOOGLE_AI_STUDIO_API_KEY' | gcloud secrets versions add GOOGLE_API_KEY --data-file=-"
 
 # 6. Create Artifact Registry Repository
 Write-Host "Creating Artifact Registry repository..." -ForegroundColor Yellow
@@ -84,7 +82,7 @@ gcloud run jobs deploy $JOB_NAME `
     --image $IMAGE_URL `
     --region $REGION `
     --service-account "${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" `
-    --set-env-vars="GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,GCS_BUCKET_NAME=$BUCKET_NAME,RECIPIENT_EMAIL=$RECIPIENT_EMAIL,SENDER_EMAIL=$SENDER_EMAIL,SENDGRID_API_KEY_SECRET_NAME=SENDGRID_API_KEY,NEWS_API_KEY_SECRET_NAME=NEWS_API_KEY,GOOGLE_API_KEY_SECRET_NAME=GOOGLE_API_KEY" `
+    --set-env-vars="GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,GCS_BUCKET_NAME=$BUCKET_NAME,RECIPIENT_EMAIL=$RECIPIENT_EMAIL,SENDER_EMAIL=$SENDER_EMAIL,SENDGRID_API_KEY_SECRET_NAME=SENDGRID_API_KEY,NEWS_API_KEY_SECRET_NAME=NEWS_API_KEY" `
     --max-retries 0 `
     --task-timeout 1200s
 

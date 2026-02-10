@@ -4,7 +4,8 @@ import json
 import logging
 from datetime import datetime, timedelta
 import requests
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import texttospeech
 from google.cloud import storage
 from google.cloud import secretmanager
@@ -22,7 +23,6 @@ REGION = os.getenv("GCP_REGION", "europe-west3")
 BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 SENDGRID_API_KEY_SECRET_NAME = os.getenv("SENDGRID_API_KEY_SECRET_NAME")
 NEWS_API_KEY_SECRET_NAME = os.getenv("NEWS_API_KEY_SECRET_NAME")
-GOOGLE_API_KEY_SECRET_NAME = os.getenv("GOOGLE_API_KEY_SECRET_NAME")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 
@@ -95,15 +95,10 @@ def fetch_news():
     return "\n".join(news_summary)
 
 def generate_script(news_content):
-    """Generates a podcast script using Google AI Studio (Gemini API) with System Instructions."""
-    logger.info("Generating script with Google AI Studio (Gemini 1.5 Flash)...")
+    """Generates a podcast script using Vertex AI (Gemini 1.5 Flash) with System Instructions."""
+    logger.info("Generating script with Vertex AI (Gemini 1.5 Flash)...")
 
-    api_key = get_secret(GOOGLE_API_KEY_SECRET_NAME)
-    if not api_key:
-        raise ValueError("Google API Key is missing or empty!")
-
-    # Using transport='rest' to avoid gRPC 'Illegal metadata' errors in some Cloud environments
-    genai.configure(api_key=api_key, transport='rest')
+    vertexai.init(project=PROJECT_ID, location=REGION)
 
     system_instruction = """
 Du bist ein erstklassiger Podcast-Redakteur für das Format "Daily Briefing".
@@ -124,7 +119,7 @@ Struktur: Intro -> Politik -> Wirtschaft -> Deep Dive Tech/AI -> Outro.
 Ausgabeformat: Ein JSON-Array von Objekten mit "speaker" ("Jules" oder "Basti") und "text".
 """
 
-    model = genai.GenerativeModel(
+    model = GenerativeModel(
         model_name="gemini-1.5-flash",
         system_instruction=system_instruction
     )
@@ -139,7 +134,7 @@ Ziele auf eine Wortzahl von insgesamt 2000-2500 Wörtern ab.
 
     response = model.generate_content(
         prompt,
-        generation_config=genai.GenerationConfig(
+        generation_config=GenerationConfig(
             response_mime_type="application/json",
             temperature=0.8,
         )
@@ -264,7 +259,7 @@ def main():
         required_vars = [
             "GCP_PROJECT", "GCS_BUCKET_NAME", "RECIPIENT_EMAIL",
             "SENDER_EMAIL", "SENDGRID_API_KEY_SECRET_NAME",
-            "NEWS_API_KEY_SECRET_NAME", "GOOGLE_API_KEY_SECRET_NAME"
+            "NEWS_API_KEY_SECRET_NAME"
         ]
         missing = [v for v in required_vars if not os.getenv(v)]
         if missing:

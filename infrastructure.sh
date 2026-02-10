@@ -20,7 +20,7 @@ echo "Starting deployment for project: $PROJECT_ID in region: $REGION"
 # 1. Enable APIs
 echo "Enabling necessary APIs..."
 gcloud services enable \
-    generativelanguage.googleapis.com \
+    aiplatform.googleapis.com \
     texttospeech.googleapis.com \
     storage.googleapis.com \
     secretmanager.googleapis.com \
@@ -37,6 +37,7 @@ gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME \
 # 3. Assign Roles to Service Account
 echo "Assigning roles to service account..."
 ROLES=(
+    "roles/aiplatform.user"
     "roles/secretmanager.secretAccessor"
     "roles/storage.objectAdmin"
     "roles/texttospeech.admin"
@@ -59,12 +60,9 @@ echo "Creating secrets (placeholders)..."
 # Note: You will need to add the actual values in the GCP Console or via gcloud
 gcloud secrets create NEWS_API_KEY --replication-policy="automatic"
 gcloud secrets create SENDGRID_API_KEY --replication-policy="automatic"
-gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic"
-
 echo "IMPORTANT: Please add your API keys to the secrets:"
 echo "echo -n 'YOUR_NEWS_API_KEY' | gcloud secrets versions add NEWS_API_KEY --data-file=-"
 echo "echo -n 'YOUR_SENDGRID_API_KEY' | gcloud secrets versions add SENDGRID_API_KEY --data-file=-"
-echo "echo -n 'YOUR_GOOGLE_AI_STUDIO_API_KEY' | gcloud secrets versions add GOOGLE_API_KEY --data-file=-"
 
 # 6. Create Artifact Registry Repository
 echo "Creating Artifact Registry repository..."
@@ -87,7 +85,7 @@ gcloud run jobs deploy $JOB_NAME \
     --image $IMAGE_URL \
     --region $REGION \
     --service-account "${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --set-env-vars="GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,GCS_BUCKET_NAME=$BUCKET_NAME,RECIPIENT_EMAIL=$RECIPIENT_EMAIL,SENDER_EMAIL=$SENDER_EMAIL,SENDGRID_API_KEY_SECRET_NAME=SENDGRID_API_KEY,NEWS_API_KEY_SECRET_NAME=NEWS_API_KEY,GOOGLE_API_KEY_SECRET_NAME=GOOGLE_API_KEY" \
+    --set-env-vars="GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,GCS_BUCKET_NAME=$BUCKET_NAME,RECIPIENT_EMAIL=$RECIPIENT_EMAIL,SENDER_EMAIL=$SENDER_EMAIL,SENDGRID_API_KEY_SECRET_NAME=SENDGRID_API_KEY,NEWS_API_KEY_SECRET_NAME=NEWS_API_KEY" \
     --max-retries 0 \
     --task-timeout 1200s # 20 minutes
 
