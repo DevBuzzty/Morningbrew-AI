@@ -17,6 +17,8 @@ from sendgrid.helpers.mail import Mail
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+VERSION = "2.1-VERTEX-AI"
+
 # Constants (Configurable via environment variables)
 PROJECT_ID = os.getenv("GCP_PROJECT")
 REGION = os.getenv("GCP_REGION", "europe-west3")
@@ -256,6 +258,7 @@ def send_email(signed_url):
         logger.error(f"Error sending email: {e}")
 
 def main():
+    logger.info(f"Starting Podcast Generator version {VERSION}")
     try:
         # Check required env vars
         required_vars = [
