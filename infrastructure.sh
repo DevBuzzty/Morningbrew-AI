@@ -43,7 +43,7 @@ ROLES=(
     "roles/aiplatform.user"
     "roles/secretmanager.secretAccessor"
     "roles/storage.objectAdmin"
-    "roles/texttospeech.admin"
+    "roles/texttospeech.user"
     "roles/iam.serviceAccountTokenCreator"
     "roles/run.jobRunner"
 )
@@ -61,8 +61,8 @@ gsutil mb -l $REGION gs://$BUCKET_NAME/ || true
 # 5. Create Secrets in Secret Manager (Placeholders)
 echo "Creating secrets (placeholders)..."
 # Note: You will need to add the actual values in the GCP Console or via gcloud
-gcloud secrets create NEWS_API_KEY --replication-policy="automatic"
-gcloud secrets create SENDGRID_API_KEY --replication-policy="automatic"
+gcloud secrets create NEWS_API_KEY --replication-policy="automatic" || true
+gcloud secrets create SENDGRID_API_KEY --replication-policy="automatic" || true
 echo "IMPORTANT: Please add your API keys to the secrets:"
 echo "echo -n 'YOUR_NEWS_API_KEY' | gcloud secrets versions add NEWS_API_KEY --data-file=-"
 echo "echo -n 'YOUR_SENDGRID_API_KEY' | gcloud secrets versions add SENDGRID_API_KEY --data-file=-"
@@ -78,11 +78,15 @@ gcloud artifacts repositories create $REPO_NAME \
 # 7. Build and Deploy Cloud Run Job
 echo "Building and deploying Cloud Run Job..."
 
-# Delete the job first to ensure a clean state and force the latest image to be used
-gcloud run jobs delete $JOB_NAME --region $REGION --quiet || true
+# Generate a unique tag to force a fresh pull
+TAG=$(date +%Y%m%d%H%M%S)
+IMAGE_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${JOB_NAME}:${TAG}"
 
-IMAGE_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${JOB_NAME}:latest"
+echo "Building image with tag: $TAG"
 gcloud builds submit --tag $IMAGE_URL
+
+# Delete the old job to ensure a clean state
+gcloud run jobs delete $JOB_NAME --region $REGION --quiet || true
 
 gcloud run jobs deploy $JOB_NAME \
     --image $IMAGE_URL \
@@ -94,6 +98,9 @@ gcloud run jobs deploy $JOB_NAME \
 
 # 8. Create Cloud Scheduler Trigger (6:00 AM CET)
 echo "Creating Cloud Scheduler trigger..."
+# Delete old scheduler job if it exists
+gcloud scheduler jobs delete ${JOB_NAME}-trigger --location $REGION --quiet || true
+
 # Note: 6:00 AM CET is handled by the Europe/Berlin timezone.
 gcloud scheduler jobs create http ${JOB_NAME}-trigger \
     --location $REGION \

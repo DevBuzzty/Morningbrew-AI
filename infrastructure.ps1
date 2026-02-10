@@ -41,7 +41,7 @@ $ROLES = @(
     "roles/aiplatform.user",
     "roles/secretmanager.secretAccessor",
     "roles/storage.objectAdmin",
-    "roles/texttospeech.admin",
+    "roles/texttospeech.user",
     "roles/iam.serviceAccountTokenCreator",
     "roles/run.jobRunner"
 )
@@ -75,11 +75,15 @@ gcloud artifacts repositories create $REPO_NAME `
 # 7. Build and Deploy Cloud Run Job
 Write-Host "Building and deploying Cloud Run Job..." -ForegroundColor Yellow
 
-# Delete the job first to ensure a clean state and force the latest image to be used
-gcloud run jobs delete $JOB_NAME --region $REGION --quiet 2>$null
+# Generate a unique tag to force a fresh pull
+$TAG = Get-Date -Format "yyyyMMddHHmmss"
+$IMAGE_URL = "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${JOB_NAME}:${TAG}"
 
-$IMAGE_URL = "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${JOB_NAME}:latest"
+Write-Host "Building image with tag: $TAG" -ForegroundColor Yellow
 gcloud builds submit --tag $IMAGE_URL
+
+# Delete the job first to ensure a clean state
+gcloud run jobs delete $JOB_NAME --region $REGION --quiet 2>$null
 
 gcloud run jobs deploy $JOB_NAME `
     --image $IMAGE_URL `
@@ -91,6 +95,10 @@ gcloud run jobs deploy $JOB_NAME `
 
 # 8. Create Cloud Scheduler Trigger (6:00 AM CET)
 Write-Host "Creating Cloud Scheduler trigger..." -ForegroundColor Yellow
+# Delete old scheduler job if it exists
+gcloud scheduler jobs delete ${JOB_NAME}-trigger --location $REGION --quiet 2>$null
+
+# Note: 6:00 AM CET is handled by the Europe/Berlin timezone.
 gcloud scheduler jobs create http ${JOB_NAME}-trigger `
     --location $REGION `
     --schedule="0 6 * * *" `

@@ -17,7 +17,7 @@ from sendgrid.helpers.mail import Mail
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "2.1-VERTEX-AI"
+VERSION = "3.0-FINAL-REGION-FIX"
 
 # Constants (Configurable via environment variables)
 PROJECT_ID = os.getenv("GCP_PROJECT")
@@ -98,7 +98,7 @@ def fetch_news():
 
 def generate_script(news_content):
     """Generates a podcast script using Vertex AI (Gemini 1.5 Flash) with System Instructions."""
-    logger.info("Generating script with Vertex AI (Gemini 1.5 Flash)...")
+    logger.info(f"Generating script with Vertex AI (Gemini 1.5 Flash) in us-central1 (Force Update v{VERSION})...")
 
     # We use us-central1 for the AI call because Gemini is guaranteed to be available there.
     # The rest of the app (Storage, TTS) stays in your local region.
@@ -233,14 +233,26 @@ def upload_to_gcs(audio_data, blob_name):
 def generate_signed_url(blob):
     """Generates a signed URL for the GCS blob (valid for 24h)."""
     logger.info(f"Generating signed URL for {blob.name}...")
-    # For V4 signing, we use the storage client's credentials.
-    # In Cloud Run, this is the Service Account attached to the job.
-    url = blob.generate_signed_url(
-        version="v4",
-        expiration=timedelta(hours=24),
-        method="GET",
-    )
-    return url
+
+    # In Cloud Run environments, we often need to specify the service account email
+    # to enable V4 signing via the metadata server.
+    sa_email = f"podcast-generator-sa@{PROJECT_ID}.iam.gserviceaccount.com"
+
+    try:
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(hours=24),
+            method="GET",
+            service_account_email=sa_email
+        )
+        return url
+    except Exception as e:
+        logger.warning(f"Signed URL generation with explicit SA failed: {e}. Falling back to default.")
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(hours=24),
+            method="GET"
+        )
 
 def send_email(signed_url):
     """Sends the signed URL via SendGrid."""
