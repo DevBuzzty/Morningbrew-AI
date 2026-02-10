@@ -96,7 +96,7 @@ def fetch_news():
 
 def generate_script(news_content):
     """Generates a podcast script using Google AI Studio (Gemini API) with System Instructions."""
-    logger.info("Generating script with Google AI Studio (Gemini 1.5 Pro)...")
+    logger.info("Generating script with Google AI Studio (Gemini 1.5 Flash)...")
 
     api_key = get_secret(GOOGLE_API_KEY_SECRET_NAME)
     if not api_key:
@@ -125,7 +125,7 @@ Ausgabeformat: Ein JSON-Array von Objekten mit "speaker" ("Jules" oder "Basti") 
 """
 
     model = genai.GenerativeModel(
-        model_name="gemini-1.5-pro",
+        model_name="gemini-1.5-flash",
         system_instruction=system_instruction
     )
 
