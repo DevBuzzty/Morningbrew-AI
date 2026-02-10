@@ -98,7 +98,9 @@ def generate_script(news_content):
     """Generates a podcast script using Vertex AI (Gemini 1.5 Flash) with System Instructions."""
     logger.info("Generating script with Vertex AI (Gemini 1.5 Flash)...")
 
-    vertexai.init(project=PROJECT_ID, location=REGION)
+    # We use us-central1 for the AI call because Gemini 1.5 Flash is guaranteed to be available there.
+    # The rest of the app (Storage, TTS) stays in your local region.
+    vertexai.init(project=PROJECT_ID, location="us-central1")
 
     system_instruction = """
 Du bist ein erstklassiger Podcast-Redakteur für das Format "Daily Briefing".
@@ -120,7 +122,7 @@ Ausgabeformat: Ein JSON-Array von Objekten mit "speaker" ("Jules" oder "Basti") 
 """
 
     model = GenerativeModel(
-        model_name="gemini-1.5-flash",
+        model_name="gemini-1.5-flash-002",
         system_instruction=system_instruction
     )
 
