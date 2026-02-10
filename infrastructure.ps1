@@ -30,14 +30,14 @@ gcloud services enable `
 # 2. Create Service Account
 Write-Host "Creating service account..." -ForegroundColor Yellow
 gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME `
-    --display-name="Service Account for Podcast Generator"
+    --display-name="Service Account for Podcast Generator" 2>$null
 
 # 3. Assign Roles to Service Account
 Write-Host "Assigning roles to service account..." -ForegroundColor Yellow
 $ROLES = @(
     "roles/secretmanager.secretAccessor",
     "roles/storage.objectAdmin",
-    "roles/texttospeech.user",
+    "roles/texttospeech.admin",
     "roles/iam.serviceAccountTokenCreator"
 )
 
@@ -72,6 +72,10 @@ gcloud artifacts repositories create $REPO_NAME `
 
 # 7. Build and Deploy Cloud Run Job
 Write-Host "Building and deploying Cloud Run Job..." -ForegroundColor Yellow
+
+# Delete the job first to ensure a clean state and force the latest image to be used
+gcloud run jobs delete $JOB_NAME --region $REGION --quiet 2>$null
+
 $IMAGE_URL = "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${JOB_NAME}:latest"
 gcloud builds submit --tag $IMAGE_URL
 
