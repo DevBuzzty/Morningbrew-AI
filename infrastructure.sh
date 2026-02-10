@@ -78,6 +78,11 @@ gcloud artifacts repositories create $REPO_NAME \
 # 7. Build and Deploy Cloud Run Job
 echo "Building and deploying Cloud Run Job..."
 
+# VERIFICATION: Print the version from main.py
+echo "--- DEPLOYMENT VERIFICATION ---"
+grep "VERSION =" main.py
+echo "------------------------------"
+
 # Generate a unique tag to force a fresh pull
 TAG=$(date +%Y%m%d%H%M%S)
 IMAGE_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${JOB_NAME}:${TAG}"

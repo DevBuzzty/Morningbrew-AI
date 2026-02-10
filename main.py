@@ -17,7 +17,7 @@ from sendgrid.helpers.mail import Mail
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "3.0-FINAL-REGION-FIX"
+VERSION = "3.1-FIX-GRPC-AND-REGION"
 
 # Constants (Configurable via environment variables)
 PROJECT_ID = os.getenv("GCP_PROJECT")
@@ -98,11 +98,17 @@ def fetch_news():
 
 def generate_script(news_content):
     """Generates a podcast script using Vertex AI (Gemini 1.5 Flash) with System Instructions."""
-    logger.info(f"Generating script with Vertex AI (Gemini 1.5 Flash) in us-central1 (Force Update v{VERSION})...")
+    target_location = "us-central1"
+    target_model = "gemini-1.5-flash"
+
+    logger.info(f"--- AI CALL START ---")
+    logger.info(f"Version: {VERSION}")
+    logger.info(f"Target Region: {target_location}")
+    logger.info(f"Target Model: {target_model}")
 
     # We use us-central1 for the AI call because Gemini is guaranteed to be available there.
     # The rest of the app (Storage, TTS) stays in your local region.
-    vertexai.init(project=PROJECT_ID, location="us-central1")
+    vertexai.init(project=PROJECT_ID, location=target_location)
 
     system_instruction = """
 Du bist ein erstklassiger Podcast-Redakteur für das Format "Daily Briefing".
@@ -123,9 +129,8 @@ Struktur: Intro -> Politik -> Wirtschaft -> Deep Dive Tech/AI -> Outro.
 Ausgabeformat: Ein JSON-Array von Objekten mit "speaker" ("Jules" oder "Basti") und "text".
 """
 
-    # We use 'gemini-1.5-flash' as the most widely available stable alias.
     model = GenerativeModel(
-        model_name="gemini-1.5-flash",
+        model_name=target_model,
         system_instruction=system_instruction
     )
 
