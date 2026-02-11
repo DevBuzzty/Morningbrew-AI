@@ -15,7 +15,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
 # Version for easy debugging
-VERSION = "4.6-VERTEX-AUTO"
+VERSION = "5.0-AUTO-2026"
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -58,17 +58,18 @@ def fetch_news():
 def generate_script(news):
     logger.info(f"Generating script (v{VERSION}) with Vertex AI...")
 
-    # Priority List: 2.0 then 1.5
+    # Since we are in 2026, we prioritize Gemini 2.0/2.5 and fallback to 1.5
     models_to_try = [
-        "gemini-2.0-flash-exp",
+        "gemini-2.0-flash",
+        "gemini-2.0-pro",
         "gemini-1.5-flash-002",
         "gemini-1.5-flash",
-        "gemini-1.5-pro-002"
+        "gemini-1.5-pro-002",
+        "gemini-1.5-pro"
     ]
 
-    # We use us-central1 for AI calls to bypass regional restrictions
-    target_location = "us-central1"
-    vertexai.init(project=PROJECT_ID, location=target_location)
+    # We try multiple regions for maximum robustness
+    regions_to_try = ["us-central1", "europe-west1", "europe-west3", "us-east4"]
 
     system_instruction = """
     Du bist ein erstklassiger Podcast-Redakteur. Erstelle ein Skript für ein 15-20 minütiges Gespräch.
@@ -80,26 +81,36 @@ def generate_script(news):
     """
 
     last_err = None
-    for model_name in models_to_try:
+    for region in regions_to_try:
+        logger.info(f"--- Trying Region: {region} ---")
         try:
-            logger.info(f"Attempting AI call with {model_name} in {target_location}...")
-            model = GenerativeModel(model_name=model_name)
-            res = model.generate_content(
-                f"{system_instruction}\n\nNews: {news}",
-                generation_config=GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0.8
-                )
-            )
-            if res and res.text:
-                logger.info(f"Success with {model_name}")
-                return json.loads(res.text)
+            vertexai.init(project=PROJECT_ID, location=region)
         except Exception as e:
-            logger.warning(f"Model {model_name} failed: {e}")
-            last_err = e
-            time.sleep(2)
+            logger.warning(f"Failed to init vertexai in {region}: {e}")
+            continue
 
-    raise Exception(f"All models in {target_location} failed. Last error: {last_err}")
+        for model_name in models_to_try:
+            try:
+                logger.info(f"Attempting AI call with {model_name} in {region}...")
+                model = GenerativeModel(model_name=model_name)
+                # Quick test of model availability
+                res = model.generate_content(
+                    f"{system_instruction}\n\nNews: {news}",
+                    generation_config=GenerationConfig(
+                        response_mime_type="application/json",
+                        temperature=0.8
+                    )
+                )
+                if res and res.text:
+                    logger.info(f"SUCCESS with {model_name} in {region}")
+                    return json.loads(res.text)
+            except Exception as e:
+                logger.warning(f"Model {model_name} in {region} failed: {e}")
+                last_err = e
+                # Short sleep between models
+                time.sleep(1)
+
+    raise Exception(f"All regions and models failed. Last error: {last_err}")
 
 def synthesize(script):
     logger.info("Synthesizing audio...")

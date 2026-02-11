@@ -27,7 +27,11 @@ gcloud services enable --project $PROJECT_ID \
     artifactregistry.googleapis.com \
     aiplatform.googleapis.com \
     generativelanguage.googleapis.com \
+    ml.googleapis.com \
     cloudbuild.googleapis.com
+
+echo "NOTE: 'gcloud ai models list' returns 0 items for foundation models by design."
+echo "Foundation models (Gemini) are managed by Google and don't appear as user-deployed models."
 
 echo "Waiting 120 seconds for API synchronization across regions..."
 sleep 120
