@@ -1,13 +1,20 @@
+# Use a slim Python base image
 FROM python:3.11-slim
 
-# Install ffmpeg
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
-
+# Set working directory
 WORKDIR /app
+
+# Install system dependencies (only minimal needed for requests/security)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy application code
+COPY main.py .
 
+# Run the application
 CMD ["python", "main.py"]
