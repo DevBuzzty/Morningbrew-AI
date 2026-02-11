@@ -5,7 +5,8 @@ import logging
 import requests
 import time
 from datetime import datetime, timedelta
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import texttospeech
 from google.cloud import storage
 from google.cloud import secretmanager
@@ -14,7 +15,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
 # Version for easy debugging
-VERSION = "4.4-MODEL-DISCOVERY"
+VERSION = "4.6-VERTEX-AUTO"
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -30,10 +31,7 @@ def get_secret(name):
     try:
         client = secretmanager.SecretManagerServiceClient()
         res = client.access_secret_version(request={"name": f"projects/{PROJECT_ID}/secrets/{name}/versions/latest"})
-        # STRIP ALL WHITESPACE AND INVISIBLE CHARS - EXTREMELY IMPORTANT
-        secret = res.payload.data.decode("UTF-8").strip()
-        secret = "".join(c for c in secret if c.isprintable())
-        return secret
+        return res.payload.data.decode("UTF-8").strip()
     except Exception as e:
         logger.error(f"Error fetching secret {name}: {e}")
         return None
@@ -58,62 +56,53 @@ def fetch_news():
     return "\n".join(summary)
 
 def generate_script(news):
-    logger.info(f"Generating script (v{VERSION}) using dynamic model discovery...")
-    api_key = get_secret("GEMINI_API_KEY")
-    if not api_key: raise Exception("GEMINI_API_KEY is missing!")
+    logger.info(f"Generating script (v{VERSION}) with Vertex AI...")
 
-    # Configure with transport='rest' to avoid gRPC/Metadata issues
-    genai.configure(api_key=api_key, transport='rest')
+    # Priority List: 2.0 then 1.5
+    models_to_try = [
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-flash-002",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro-002"
+    ]
 
-    # Dynamically find all available models that support generation
-    try:
-        all_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-        # Prioritize 1.5 Flash (cheaper/faster), then Pro
-        flash_models = sorted([m for m in all_models if "1.5-flash" in m])
-        pro_models = sorted([m for m in all_models if "1.5-pro" in m])
-        others = sorted([m for m in all_models if m not in flash_models and m not in pro_models])
-
-        models_to_try = flash_models + pro_models + others
-        logger.info(f"Discovery found {len(models_to_try)} candidate models: {models_to_try}")
-    except Exception as e:
-        logger.warning(f"Model discovery failed: {e}. Using hardcoded fallback list.")
-        models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
-
-    last_err = None
+    # We use us-central1 for AI calls to bypass regional restrictions
+    target_location = "us-central1"
+    vertexai.init(project=PROJECT_ID, location=target_location)
 
     system_instruction = """
-    Du bist ein erfahrener Podcast-Produzent. Erstelle ein Skript für ein 15-20 minütiges Gespräch (ca. 2500 Wörter).
+    Du bist ein erstklassiger Podcast-Redakteur. Erstelle ein Skript für ein 15-20 minütiges Gespräch.
     Sprecher:
-    1. Jules: Weiblich, KI-Expertin, sehr optimistisch und energiegeladen.
-    2. Basti: Männlich, kritischer Beobachter, hinterfragt Trends, eher ruhig.
-     Struktur: Intro, Politik, Wirtschaft, Deep Dive AI, Outro.
-    Tonfall: Professionell aber locker. Sprache: Deutsch.
+    - Jules: Weiblich, Tech-Optimistin, energiegeladen.
+    - Basti: Männlich, kritischer Beobachter, hinterfragt Hypes.
+    Sprache: Deutsch. Tonfall: Professionell aber konversationsorientiert.
     Format: AUSSCHLIESSLICH ein JSON-Array von Objekten mit "speaker" und "text".
     """
 
+    last_err = None
     for model_name in models_to_try:
-        # Skip experimental or older models that might be flaky
-        if any(x in model_name for x in ["vision", "embedding", "aqa"]): continue
-
         try:
-            logger.info(f"Attempting with model: {model_name}")
-            model = genai.GenerativeModel(model_name=model_name)
+            logger.info(f"Attempting AI call with {model_name} in {target_location}...")
+            model = GenerativeModel(model_name=model_name)
             res = model.generate_content(
-                f"{system_instruction}\n\nHier sind die News:\n{news}",
-                generation_config={"response_mime_type": "application/json", "temperature": 0.8}
+                f"{system_instruction}\n\nNews: {news}",
+                generation_config=GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0.8
+                )
             )
             if res and res.text:
-                logger.info(f"AI Success with {model_name}")
+                logger.info(f"Success with {model_name}")
                 return json.loads(res.text)
         except Exception as e:
-            logger.warning(f"Failed with {model_name}: {e}")
+            logger.warning(f"Model {model_name} failed: {e}")
             last_err = e
             time.sleep(2)
 
-    raise Exception(f"All {len(models_to_try)} discovered AI models failed. Last error: {last_err}")
+    raise Exception(f"All models in {target_location} failed. Last error: {last_err}")
 
 def synthesize(script):
-    logger.info("Synthesizing audio with Cloud TTS...")
+    logger.info("Synthesizing audio...")
     client = texttospeech.TextToSpeechClient()
     combined = AudioSegment.empty()
 
@@ -129,7 +118,7 @@ def synthesize(script):
         if not text: continue
 
         voice = voices.get(speaker, voices["Jules"])
-        chunks = [text[i:i+4800] for i in range(0, len(text), 4800)]
+        chunks = [text[i:i+4500] for i in range(0, len(text), 4500)]
         for chunk in chunks:
             s_input = texttospeech.SynthesisInput(text=chunk)
             response = client.synthesize_speech(input=s_input, voice=voice, audio_config=cfg)
@@ -143,7 +132,7 @@ def synthesize(script):
     return out.getvalue()
 
 def main():
-    logger.info(f"Starting Podcast Briefing version {VERSION}")
+    logger.info(f"Starting Podcast Generator v{VERSION}")
     if not all([PROJECT_ID, BUCKET_NAME, RECIPIENT_EMAIL, SENDER_EMAIL]):
         logger.error("Missing ENV VARS!")
         return
@@ -166,13 +155,13 @@ def main():
         if sg_key:
             sg = SendGridAPIClient(sg_key)
             mail = Mail(from_email=SENDER_EMAIL, to_emails=RECIPIENT_EMAIL,
-                        subject=f"Podcast Briefing {datetime.now().strftime('%d.%m.%Y')}",
-                        plain_text_content=f"Hier ist dein Podcast: {url}")
+                        subject=f"Dein Audio-Briefing ({datetime.now().strftime('%d.%m.%Y')})",
+                        plain_text_content=f"Guten Morgen! Hier ist dein Podcast: {url}")
             sg.send(mail)
 
-        logger.info("DONE!")
+        logger.info("Process completed successfully.")
     except Exception as e:
-        logger.error(f"FATAL: {e}")
+        logger.error(f"Fatal crash: {e}")
         raise e
 
 if __name__ == "__main__":

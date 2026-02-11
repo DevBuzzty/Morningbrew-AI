@@ -37,11 +37,17 @@ gcloud iam service-accounts create $SA_NAME --display-name="Podcast Service Acco
 
 echo "Granting Permissions..."
 SA_EMAIL="serviceAccount:${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
-gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="roles/secretmanager.secretAccessor" --project $PROJECT_ID
-gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="roles/storage.objectAdmin" --project $PROJECT_ID
-gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="roles/iam.serviceAccountTokenCreator" --project $PROJECT_ID
-gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="roles/run.jobRunner" --project $PROJECT_ID
-gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="roles/texttospeech.admin" --project $PROJECT_ID
+ROLES=(
+    "roles/secretmanager.secretAccessor"
+    "roles/storage.objectAdmin"
+    "roles/iam.serviceAccountTokenCreator"
+    "roles/run.admin"
+    "roles/texttospeech.user"
+    "roles/aiplatform.user"
+)
+for ROLE in "${ROLES[@]}"; do
+    gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="$ROLE" --project $PROJECT_ID
+done
 
 echo "Creating Bucket..."
 gsutil mb -p $PROJECT_ID -l $REGION gs://$BUCKET_NAME/ || true
@@ -71,4 +77,4 @@ gcloud scheduler jobs create http ${JOB_NAME}-trigger --location $REGION --proje
     --http-method POST --oauth-service-account-email "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 echo "Done! Deployment successful."
-echo "IMPORTANT: Ensure you have added your GEMINI_API_KEY from aistudio.google.com!"
+echo "IMPORTANT: No GEMINI_API_KEY needed for this Vertex version!"
