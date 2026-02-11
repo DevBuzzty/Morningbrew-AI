@@ -4,7 +4,10 @@ import json
 import logging
 import requests
 import time
+import html
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import texttospeech
@@ -14,165 +17,205 @@ from pydub import AudioSegment
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
-# Version for easy debugging
-VERSION = "5.0-AUTO-2026"
-
-# Setup Logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# --- CONFIG & LOGGING ---
+VERSION = "6.0-ULTRA-OPTIMIZED"
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-# Config
 PROJECT_ID = os.getenv("GCP_PROJECT")
 BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 
+# --- UTILS ---
 def get_secret(name):
     try:
         client = secretmanager.SecretManagerServiceClient()
-        res = client.access_secret_version(request={"name": f"projects/{PROJECT_ID}/secrets/{name}/versions/latest"})
+        path = f"projects/{PROJECT_ID}/secrets/{name}/versions/latest"
+        res = client.access_secret_version(request={"name": path})
         return res.payload.data.decode("UTF-8").strip()
     except Exception as e:
-        logger.error(f"Error fetching secret {name}: {e}")
+        logger.error(f"Secret {name} failed: {e}")
         return None
 
+# --- STEP 1: NEWS FETCHING ---
 def fetch_news():
-    logger.info("Fetching news from NewsAPI...")
+    logger.info("Step 1: Fetching News Headlines...")
     api_key = get_secret("NEWS_API_KEY")
-    if not api_key: return "Keine Nachrichten verfügbar."
+    if not api_key: return "Keine aktuellen Nachrichten gefunden."
 
-    summary = []
-    categories = ["general", "business", "technology"]
+    categories = ["general", "business", "technology", "science"]
+    all_articles = []
+
     for cat in categories:
-        url = f"https://newsapi.org/v2/top-headlines?country=de&category={cat}&apiKey={api_key}"
         try:
+            url = f"https://newsapi.org/v2/top-headlines?country=de&category={cat}&apiKey={api_key}"
             r = requests.get(url, timeout=10)
-            data = r.json()
-            articles = data.get("articles", [])[:5]
-            summary.append(f"--- Category: {cat} ---")
-            summary.extend([f"- {a['title']}: {a['description']}" for a in articles])
-        except Exception:
-            continue
-    return "\n".join(summary)
+            articles = r.json().get("articles", [])[:4]
+            for a in articles:
+                all_articles.append(f"[{cat.upper()}] {a['title']}: {a.get('description', '')}")
+        except Exception as e:
+            logger.warning(f"Failed category {cat}: {e}")
 
-def generate_script(news):
-    logger.info(f"Generating script (v{VERSION}) with Vertex AI...")
+    return "\n".join(all_articles)
 
-    # Since we are in 2026, we prioritize Gemini 2.0/2.5 and fallback to 1.5
-    models_to_try = [
-        "gemini-2.0-flash",
-        "gemini-2.0-pro",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro-002",
-        "gemini-1.5-pro"
-    ]
+# --- STEP 2: AI SCRIPT GENERATION (CHAIN OF THOUGHT) ---
+def generate_script(news_content):
+    logger.info(f"Step 2: Generating CoT Script (v{VERSION})...")
 
-    # We try multiple regions for maximum robustness
-    regions_to_try = ["us-central1", "europe-west1", "europe-west3", "us-east4"]
+    regions = ["us-central1", "europe-west1", "europe-west3"]
+    models = ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-pro"]
 
     system_instruction = """
-    Du bist ein erstklassiger Podcast-Redakteur. Erstelle ein Skript für ein 15-20 minütiges Gespräch.
+    Rolle: Du bist ein Podcast-Produzent für "Morgenpost".
     Sprecher:
-    - Jules: Weiblich, Tech-Optimistin, energiegeladen.
-    - Basti: Männlich, kritischer Beobachter, hinterfragt Hypes.
-    Sprache: Deutsch. Tonfall: Professionell aber konversationsorientiert.
-    Format: AUSSCHLIESSLICH ein JSON-Array von Objekten mit "speaker" und "text".
+    - Jules: Enthusiastisch, schnell, liebt Fortschritt. (Weiblich)
+    - Basti: Kritisch, bedacht, hinterfragt Konsequenzen. (Männlich)
+
+    Aufgabe: Erstelle ein 15-20 minütiges Gespräch (ca. 2000-2500 Wörter).
+    Format: AUSSCHLIESSLICH ein JSON-Array von Objekten: [{"speaker": "Jules", "text": "..."}]
+
+    Workflow:
+    1. Analysiere die News.
+    2. Erstelle einen roten Faden (Intro -> News -> Deep Dive -> Outro).
+    3. Schreibe lebendige Dialoge in natürlichem Deutsch. Vermeide Roboter-Sprache.
     """
 
-    last_err = None
-    for region in regions_to_try:
-        logger.info(f"--- Trying Region: {region} ---")
+    for region in regions:
+        logger.info(f"Connecting to Vertex AI in {region}...")
         try:
             vertexai.init(project=PROJECT_ID, location=region)
-        except Exception as e:
-            logger.warning(f"Failed to init vertexai in {region}: {e}")
-            continue
-
-        for model_name in models_to_try:
-            try:
-                logger.info(f"Attempting AI call with {model_name} in {region}...")
-                model = GenerativeModel(model_name=model_name)
-                # Quick test of model availability
-                res = model.generate_content(
-                    f"{system_instruction}\n\nNews: {news}",
-                    generation_config=GenerationConfig(
-                        response_mime_type="application/json",
-                        temperature=0.8
+            for model_name in models:
+                try:
+                    logger.info(f"Attempting {model_name}...")
+                    model = GenerativeModel(model_name=model_name)
+                    # Use a high max_output_tokens for the long script
+                    response = model.generate_content(
+                        f"{system_instruction}\n\nNews:\n{news_content}",
+                        generation_config=GenerationConfig(
+                            response_mime_type="application/json",
+                            temperature=0.85,
+                            max_output_tokens=8192
+                        )
                     )
-                )
-                if res and res.text:
-                    logger.info(f"SUCCESS with {model_name} in {region}")
-                    return json.loads(res.text)
-            except Exception as e:
-                logger.warning(f"Model {model_name} in {region} failed: {e}")
-                last_err = e
-                # Short sleep between models
-                time.sleep(1)
+                    if response.text:
+                        script = json.loads(response.text)
+                        logger.info(f"Script generated successfully ({len(script)} segments).")
+                        return script
+                except Exception as e:
+                    logger.warning(f"Model {model_name} in {region} failed: {e}")
+        except Exception as e:
+            logger.error(f"Region {region} init failed: {e}")
 
-    raise Exception(f"All regions and models failed. Last error: {last_err}")
+    raise Exception("Model discovery failed completely.")
 
-def synthesize(script):
-    logger.info("Synthesizing audio...")
-    client = texttospeech.TextToSpeechClient()
-    combined = AudioSegment.empty()
-
-    voices = {
-        "Jules": texttospeech.VoiceSelectionParams(language_code="de-DE", name="de-DE-Neural2-F"),
-        "Basti": texttospeech.VoiceSelectionParams(language_code="de-DE", name="de-DE-Neural2-B")
+# --- STEP 3: PARALLEL AUDIO SYNTHESIS (SSML) ---
+def tts_worker(segment_index, speaker, text, client):
+    """Worker function for parallel TTS calls."""
+    # Build SSML for better quality
+    voice_map = {
+        "Jules": {"name": "de-DE-Neural2-F", "pitch": "+1st", "rate": "1.05"},
+        "Basti": {"name": "de-DE-Neural2-B", "pitch": "-1st", "rate": "0.95"}
     }
-    cfg = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
+    v = voice_map.get(speaker, voice_map["Jules"])
 
-    for line in script:
-        speaker = line.get("speaker", "Jules")
-        text = line.get("text", "")
-        if not text: continue
+    # Escape special characters for SSML (XML)
+    escaped_text = html.escape(text)
 
-        voice = voices.get(speaker, voices["Jules"])
-        chunks = [text[i:i+4500] for i in range(0, len(text), 4500)]
-        for chunk in chunks:
-            s_input = texttospeech.SynthesisInput(text=chunk)
-            response = client.synthesize_speech(input=s_input, voice=voice, audio_config=cfg)
-            segment = AudioSegment.from_file(io.BytesIO(response.audio_content), format="mp3")
+    ssml = f"""
+    <speak>
+        <prosody rate='{v['rate']}' pitch='{v['pitch']}'>
+            {escaped_text}
+        </prosody>
+    </speak>
+    """
+
+    s_input = texttospeech.SynthesisInput(ssml=ssml)
+    voice_params = texttospeech.VoiceSelectionParams(language_code="de-DE", name=v["name"])
+    audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
+
+    try:
+        response = client.synthesize_speech(input=s_input, voice=voice_params, audio_config=audio_config)
+        return (segment_index, response.audio_content)
+    except Exception as e:
+        logger.error(f"TTS Segment {segment_index} failed: {e}")
+        return (segment_index, None)
+
+def synthesize_parallel(script):
+    logger.info("Step 3: Parallel Audio Synthesis...")
+    client = texttospeech.TextToSpeechClient()
+
+    # We use a ThreadPool for I/O bound TTS calls
+    results = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(tts_worker, i, s["speaker"], s["text"], client): i for i, s in enumerate(script)}
+        for future in as_completed(futures):
+            idx, audio = future.result()
+            if audio:
+                results[idx] = audio
+
+    # Stitching
+    logger.info("Stitching segments...")
+    combined = AudioSegment.empty()
+    for i in range(len(script)):
+        if i in results:
+            segment = AudioSegment.from_file(io.BytesIO(results[i]), format="mp3")
             combined += segment
+            # Add natural pause between speakers
+            combined += AudioSegment.silent(duration=700)
 
-        combined += AudioSegment.silent(duration=600)
+    out_buffer = io.BytesIO()
+    combined.export(out_buffer, format="mp3", bitrate="128k")
+    return out_buffer.getvalue()
 
-    out = io.BytesIO()
-    combined.export(out, format="mp3")
-    return out.getvalue()
-
+# --- MAIN EXECUTION ---
 def main():
-    logger.info(f"Starting Podcast Generator v{VERSION}")
+    start_time = time.time()
+    logger.info(f"--- Morgenpost Generator v{VERSION} Started ---")
+
     if not all([PROJECT_ID, BUCKET_NAME, RECIPIENT_EMAIL, SENDER_EMAIL]):
-        logger.error("Missing ENV VARS!")
+        logger.error("Environment variables missing!")
         return
 
     try:
+        # 1. Fetch
         news = fetch_news()
-        script = generate_script(news)
-        audio = synthesize(script)
 
-        filename = f"briefing_{datetime.now().strftime('%Y%m%d_%H%M')}.mp3"
+        # 2. Generate
+        script = generate_script(news)
+
+        # 3. Synthesize
+        audio_data = synthesize_parallel(script)
+
+        # 4. Store
+        filename = f"morgenpost_{datetime.now().strftime('%Y%m%d_%H%M')}.mp3"
         storage_client = storage.Client()
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(filename)
-        blob.upload_from_string(audio, content_type="audio/mpeg")
+        blob.upload_from_string(audio_data, content_type="audio/mpeg")
 
+        # 5. Deliver
         sa_email = f"podcast-generator-sa@{PROJECT_ID}.iam.gserviceaccount.com"
         url = blob.generate_signed_url(version="v4", expiration=timedelta(hours=24), method="GET", service_account_email=sa_email)
 
         sg_key = get_secret("SENDGRID_API_KEY")
         if sg_key:
             sg = SendGridAPIClient(sg_key)
-            mail = Mail(from_email=SENDER_EMAIL, to_emails=RECIPIENT_EMAIL,
-                        subject=f"Dein Audio-Briefing ({datetime.now().strftime('%d.%m.%Y')})",
-                        plain_text_content=f"Guten Morgen! Hier ist dein Podcast: {url}")
+            mail = Mail(
+                from_email=SENDER_EMAIL,
+                to_emails=RECIPIENT_EMAIL,
+                subject=f"Dein Morgen-Briefing ({datetime.now().strftime('%d.%m.%Y')})",
+                plain_text_content=f"Guten Morgen!\n\nDein heutiger Podcast ist fertig: {url}\n\nViel Spaß beim Hören!"
+            )
             sg.send(mail)
+            logger.info("Email sent successfully.")
 
-        logger.info("Process completed successfully.")
+        duration = time.time() - start_time
+        logger.info(f"Total processing time: {duration:.2f}s")
+        logger.info("--- Processing Complete ---")
+
     except Exception as e:
-        logger.error(f"Fatal crash: {e}")
+        logger.critical(f"FATAL ERROR: {e}", exc_info=True)
         raise e
 
 if __name__ == "__main__":

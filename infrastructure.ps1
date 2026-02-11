@@ -68,7 +68,8 @@ gcloud run jobs delete $JOB_NAME --region $REGION --project $PROJECT_ID --quiet 
 gcloud run jobs deploy $JOB_NAME --image $IMAGE_URL --region $REGION --project $PROJECT_ID `
     --service-account "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" `
     --set-env-vars "GCP_PROJECT=$PROJECT_ID,GCS_BUCKET_NAME=$BUCKET_NAME,RECIPIENT_EMAIL=$RECIPIENT_EMAIL,SENDER_EMAIL=$SENDER_EMAIL" `
-    --task-timeout=1200s
+    --cpu=2 --memory=2Gi `
+    --task-timeout=1800s
 
 Write-Host "Creating Scheduler..." -ForegroundColor Yellow
 gcloud scheduler jobs delete ${JOB_NAME}-trigger --location $REGION --project $PROJECT_ID --quiet 2>$null

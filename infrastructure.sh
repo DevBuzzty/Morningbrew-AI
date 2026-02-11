@@ -72,7 +72,8 @@ gcloud run jobs delete $JOB_NAME --region $REGION --project $PROJECT_ID --quiet 
 gcloud run jobs deploy $JOB_NAME --image $IMAGE_URL --region $REGION --project $PROJECT_ID \
     --service-account "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" \
     --set-env-vars "GCP_PROJECT=$PROJECT_ID,GCS_BUCKET_NAME=$BUCKET_NAME,RECIPIENT_EMAIL=$RECIPIENT_EMAIL,SENDER_EMAIL=$SENDER_EMAIL" \
-    --task-timeout=1200s
+    --cpu=2 --memory=2Gi \
+    --task-timeout=1800s
 
 echo "Creating Scheduler..."
 gcloud scheduler jobs delete ${JOB_NAME}-trigger --location $REGION --project $PROJECT_ID --quiet || true
@@ -80,5 +81,5 @@ gcloud scheduler jobs create http ${JOB_NAME}-trigger --location $REGION --proje
     --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/${JOB_NAME}:run" \
     --http-method POST --oauth-service-account-email "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-echo "Done! Deployment successful."
-echo "IMPORTANT: No GEMINI_API_KEY needed for this Vertex version!"
+echo "Done! Deployment of Morgenpost v6.0 successful."
+echo "Optimizations active: Parallel synthesis, SSML quality, and CoT scripting."
