@@ -16,7 +16,7 @@ if (-not $PROJECT_ID) {
 
 Write-Host "Starting Deployment for Project: $PROJECT_ID" -ForegroundColor Cyan
 
-Write-Host "Enabling all necessary APIs (this takes time)..." -ForegroundColor Yellow
+Write-Host "Enabling all necessary APIs (this takes up to 2 minutes)..." -ForegroundColor Yellow
 gcloud services enable --project $PROJECT_ID `
     run.googleapis.com `
     secretmanager.googleapis.com `
@@ -25,10 +25,11 @@ gcloud services enable --project $PROJECT_ID `
     cloudscheduler.googleapis.com `
     artifactregistry.googleapis.com `
     aiplatform.googleapis.com `
+    generativelanguage.googleapis.com `
     cloudbuild.googleapis.com
 
-Write-Host "Waiting 90 seconds for API synchronization..." -ForegroundColor Yellow
-Start-Sleep -Seconds 90
+Write-Host "Waiting 120 seconds for API synchronization across regions..." -ForegroundColor Yellow
+Start-Sleep -Seconds 120
 
 Write-Host "Creating Service Account..." -ForegroundColor Yellow
 gcloud iam service-accounts create $SA_NAME --display-name="Podcast Service Account" --project $PROJECT_ID 2>$null
@@ -40,13 +41,13 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="ro
 gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="roles/iam.serviceAccountTokenCreator" --project $PROJECT_ID
 gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="roles/run.jobRunner" --project $PROJECT_ID
 gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="roles/texttospeech.admin" --project $PROJECT_ID
-gcloud projects add-iam-policy-binding $PROJECT_ID --member=$SA_EMAIL --role="roles/aiplatform.user" --project $PROJECT_ID
 
 Write-Host "Creating Bucket..." -ForegroundColor Yellow
 gsutil mb -p $PROJECT_ID -l $REGION gs://$BUCKET_NAME/ 2>$null
 
 Write-Host "Creating Secrets..." -ForegroundColor Yellow
 gcloud secrets create NEWS_API_KEY --project $PROJECT_ID 2>$null
+gcloud secrets create GEMINI_API_KEY --project $PROJECT_ID 2>$null
 gcloud secrets create SENDGRID_API_KEY --project $PROJECT_ID 2>$null
 
 Write-Host "Building and Deploying..." -ForegroundColor Yellow
@@ -70,6 +71,4 @@ gcloud scheduler jobs create http ${JOB_NAME}-trigger --location $REGION --proje
     --http-method POST --oauth-service-account-email "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 Write-Host "Done! Deployment successful." -ForegroundColor Green
-Write-Host "IMPORTANT: Add your secrets now:" -ForegroundColor Cyan
-Write-Host "echo -n 'KEY' | gcloud secrets versions add NEWS_API_KEY --data-file=-"
-Write-Host "echo -n 'KEY' | gcloud secrets versions add SENDGRID_API_KEY --data-file=-"
+Write-Host "IMPORTANT: Ensure you have added your GEMINI_API_KEY from aistudio.google.com!" -ForegroundColor Cyan

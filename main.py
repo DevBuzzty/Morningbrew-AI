@@ -5,8 +5,7 @@ import logging
 import requests
 import time
 from datetime import datetime, timedelta
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+import google.generativeai as genai
 from google.cloud import texttospeech
 from google.cloud import storage
 from google.cloud import secretmanager
@@ -15,7 +14,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
 # Version for easy debugging
-VERSION = "4.2-VERTEX-STABLE"
+VERSION = "4.3-ULTRA-RESILIENT"
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -26,13 +25,15 @@ PROJECT_ID = os.getenv("GCP_PROJECT")
 BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
-REGION = "europe-west3"
 
 def get_secret(name):
     try:
         client = secretmanager.SecretManagerServiceClient()
         res = client.access_secret_version(request={"name": f"projects/{PROJECT_ID}/secrets/{name}/versions/latest"})
-        return res.payload.data.decode("UTF-8").strip()
+        # STRIP ALL WHITESPACE AND INVISIBLE CHARS - EXTREMELY IMPORTANT
+        secret = res.payload.data.decode("UTF-8").strip()
+        secret = "".join(c for c in secret if c.isprintable())
+        return secret
     except Exception as e:
         logger.error(f"Error fetching secret {name}: {e}")
         return None
@@ -57,47 +58,44 @@ def fetch_news():
     return "\n".join(summary)
 
 def generate_script(news):
-    logger.info("Generating script with Vertex AI (Gemini 1.5 Flash)...")
+    logger.info(f"Generating script (v{VERSION}) with Gemini 1.5 Flash...")
+    api_key = get_secret("GEMINI_API_KEY")
+    if not api_key: raise Exception("GEMINI_API_KEY is missing!")
 
-    # us-central1 is the most stable region for Gemini availability
-    vertexai.init(project=PROJECT_ID, location="us-central1")
+    # Configure with transport='rest' to avoid gRPC/Metadata issues
+    genai.configure(api_key=api_key, transport='rest')
 
-    model = GenerativeModel("gemini-1.5-flash")
+    # Try multiple model names for fallback
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
+    last_err = None
 
     system_instruction = """
     Du bist ein erfahrener Podcast-Produzent. Erstelle ein Skript für ein 15-20 minütiges Gespräch (ca. 2500 Wörter).
     Sprecher:
     1. Jules: Weiblich, KI-Expertin, sehr optimistisch und energiegeladen.
     2. Basti: Männlich, kritischer Beobachter, hinterfragt Trends, eher ruhig.
-
-    Struktur:
-    - Intro: Begrüßung.
-    - Politik: Analyse der Schlagzeilen.
-    - Wirtschaft: Trends und Auswirkungen.
-    - Deep Dive AI: Fokus auf Technologie.
-    - Outro: Verabschiedung.
-
-    Tonfall: Professionell aber locker, wie ein echtes Gespräch. Die beiden sollen wirklich debattieren.
-    Sprache: Deutsch.
-    Format: AUSSCHLIESSLICH ein JSON-Array von Objekten mit "speaker" ("Jules" oder "Basti") und "text".
+     Struktur: Intro, Politik, Wirtschaft, Deep Dive AI, Outro.
+    Tonfall: Professionell aber locker. Sprache: Deutsch.
+    Format: AUSSCHLIESSLICH ein JSON-Array von Objekten mit "speaker" und "text".
     """
 
-    prompt = f"Hier sind die News des Tages:\n{news}\n\nErstelle das Skript basierend auf der Systemanweisung."
-
-    try:
-        res = model.generate_content(
-            prompt,
-            generation_config=GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0.8
+    for model_name in models_to_try:
+        try:
+            logger.info(f"Attempting with model: {model_name}")
+            model = genai.GenerativeModel(model_name=model_name)
+            res = model.generate_content(
+                f"{system_instruction}\n\nHier sind die News:\n{news}",
+                generation_config={"response_mime_type": "application/json", "temperature": 0.8}
             )
-        )
-        return json.loads(res.text)
-    except Exception as e:
-        logger.error(f"AI Error: {e}")
-        # Log available models for debugging if it fails
-        logger.info("Tip: Ensure Vertex AI API is enabled in your project.")
-        raise e
+            if res and res.text:
+                logger.info(f"AI Success with {model_name}")
+                return json.loads(res.text)
+        except Exception as e:
+            logger.warning(f"Failed with {model_name}: {e}")
+            last_err = e
+            time.sleep(2)
+
+    raise Exception(f"All AI models failed. Last error: {last_err}")
 
 def synthesize(script):
     logger.info("Synthesizing audio with Cloud TTS...")
@@ -132,7 +130,7 @@ def synthesize(script):
 def main():
     logger.info(f"Starting Podcast Briefing version {VERSION}")
     if not all([PROJECT_ID, BUCKET_NAME, RECIPIENT_EMAIL, SENDER_EMAIL]):
-        logger.error("Missing required Environment Variables!")
+        logger.error("Missing ENV VARS!")
         return
 
     try:
@@ -147,24 +145,19 @@ def main():
         blob.upload_from_string(audio, content_type="audio/mpeg")
 
         sa_email = f"podcast-generator-sa@{PROJECT_ID}.iam.gserviceaccount.com"
-        url = blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(hours=24),
-            method="GET",
-            service_account_email=sa_email
-        )
+        url = blob.generate_signed_url(version="v4", expiration=timedelta(hours=24), method="GET", service_account_email=sa_email)
 
         sg_key = get_secret("SENDGRID_API_KEY")
         if sg_key:
             sg = SendGridAPIClient(sg_key)
             mail = Mail(from_email=SENDER_EMAIL, to_emails=RECIPIENT_EMAIL,
-                        subject=f"Dein Audio-Briefing ({datetime.now().strftime('%d.%m.%Y')})",
-                        plain_text_content=f"Guten Morgen!\n\nHier ist dein tägliches Podcast-Briefing: {url}\n\nDer Link ist 24 Stunden gültig.")
+                        subject=f"Podcast Briefing {datetime.now().strftime('%d.%m.%Y')}",
+                        plain_text_content=f"Hier ist dein Podcast: {url}")
             sg.send(mail)
 
-        logger.info("Process completed successfully.")
+        logger.info("DONE!")
     except Exception as e:
-        logger.error(f"Fatal crash: {e}")
+        logger.error(f"FATAL: {e}")
         raise e
 
 if __name__ == "__main__":
