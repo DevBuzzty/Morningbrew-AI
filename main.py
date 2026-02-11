@@ -5,7 +5,8 @@ import logging
 import requests
 import time
 from datetime import datetime, timedelta
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import texttospeech
 from google.cloud import storage
 from google.cloud import secretmanager
@@ -14,7 +15,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
 # Version for easy debugging
-VERSION = "4.1"
+VERSION = "4.2-VERTEX-STABLE"
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -25,6 +26,7 @@ PROJECT_ID = os.getenv("GCP_PROJECT")
 BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+REGION = "europe-west3"
 
 def get_secret(name):
     try:
@@ -40,13 +42,12 @@ def fetch_news():
     api_key = get_secret("NEWS_API_KEY")
     if not api_key: return "Keine Nachrichten verfügbar."
 
-    # Fetching multiple categories for better coverage
     summary = []
     categories = ["general", "business", "technology"]
     for cat in categories:
         url = f"https://newsapi.org/v2/top-headlines?country=de&category={cat}&apiKey={api_key}"
         try:
-            r = requests.get(url)
+            r = requests.get(url, timeout=10)
             data = r.json()
             articles = data.get("articles", [])[:5]
             summary.append(f"--- Category: {cat} ---")
@@ -56,13 +57,12 @@ def fetch_news():
     return "\n".join(summary)
 
 def generate_script(news):
-    logger.info("Generating script with Gemini 1.5 Flash (AI Studio)...")
-    api_key = get_secret("GEMINI_API_KEY")
-    if not api_key: raise Exception("Missing GEMINI_API_KEY")
+    logger.info("Generating script with Vertex AI (Gemini 1.5 Flash)...")
 
-    # Use transport='rest' to avoid gRPC metadata issues in some cloud environments
-    genai.configure(api_key=api_key, transport='rest')
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # us-central1 is the most stable region for Gemini availability
+    vertexai.init(project=PROJECT_ID, location="us-central1")
+
+    model = GenerativeModel("gemini-1.5-flash")
 
     system_instruction = """
     Du bist ein erfahrener Podcast-Produzent. Erstelle ein Skript für ein 15-20 minütiges Gespräch (ca. 2500 Wörter).
@@ -84,14 +84,20 @@ def generate_script(news):
 
     prompt = f"Hier sind die News des Tages:\n{news}\n\nErstelle das Skript basierend auf der Systemanweisung."
 
-    res = model.generate_content(
-        prompt,
-        generation_config={
-            "response_mime_type": "application/json",
-            "temperature": 0.8
-        }
-    )
-    return json.loads(res.text)
+    try:
+        res = model.generate_content(
+            prompt,
+            generation_config=GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.8
+            )
+        )
+        return json.loads(res.text)
+    except Exception as e:
+        logger.error(f"AI Error: {e}")
+        # Log available models for debugging if it fails
+        logger.info("Tip: Ensure Vertex AI API is enabled in your project.")
+        raise e
 
 def synthesize(script):
     logger.info("Synthesizing audio with Cloud TTS...")
@@ -110,7 +116,6 @@ def synthesize(script):
         if not text: continue
 
         voice = voices.get(speaker, voices["Jules"])
-        # Split text into chunks to avoid 5000 byte limit
         chunks = [text[i:i+4800] for i in range(0, len(text), 4800)]
         for chunk in chunks:
             s_input = texttospeech.SynthesisInput(text=chunk)
@@ -141,7 +146,6 @@ def main():
         blob = bucket.blob(filename)
         blob.upload_from_string(audio, content_type="audio/mpeg")
 
-        # Robust Signed URL generation
         sa_email = f"podcast-generator-sa@{PROJECT_ID}.iam.gserviceaccount.com"
         url = blob.generate_signed_url(
             version="v4",
@@ -150,11 +154,14 @@ def main():
             service_account_email=sa_email
         )
 
-        sg = SendGridAPIClient(get_secret("SENDGRID_API_KEY"))
-        mail = Mail(from_email=SENDER_EMAIL, to_emails=RECIPIENT_EMAIL,
-                    subject=f"Dein Audio-Briefing ({datetime.now().strftime('%d.%m.%Y')})",
-                    plain_text_content=f"Guten Morgen!\n\nHier ist dein tägliches Podcast-Briefing: {url}\n\nDer Link ist 24 Stunden gültig.")
-        sg.send(mail)
+        sg_key = get_secret("SENDGRID_API_KEY")
+        if sg_key:
+            sg = SendGridAPIClient(sg_key)
+            mail = Mail(from_email=SENDER_EMAIL, to_emails=RECIPIENT_EMAIL,
+                        subject=f"Dein Audio-Briefing ({datetime.now().strftime('%d.%m.%Y')})",
+                        plain_text_content=f"Guten Morgen!\n\nHier ist dein tägliches Podcast-Briefing: {url}\n\nDer Link ist 24 Stunden gültig.")
+            sg.send(mail)
+
         logger.info("Process completed successfully.")
     except Exception as e:
         logger.error(f"Fatal crash: {e}")
