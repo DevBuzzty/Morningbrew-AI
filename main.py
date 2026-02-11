@@ -14,7 +14,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
 # Version for easy debugging
-VERSION = "4.3-ULTRA-RESILIENT"
+VERSION = "4.4-MODEL-DISCOVERY"
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -58,15 +58,27 @@ def fetch_news():
     return "\n".join(summary)
 
 def generate_script(news):
-    logger.info(f"Generating script (v{VERSION}) with Gemini 1.5 Flash...")
+    logger.info(f"Generating script (v{VERSION}) using dynamic model discovery...")
     api_key = get_secret("GEMINI_API_KEY")
     if not api_key: raise Exception("GEMINI_API_KEY is missing!")
 
     # Configure with transport='rest' to avoid gRPC/Metadata issues
     genai.configure(api_key=api_key, transport='rest')
 
-    # Try multiple model names for fallback
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
+    # Dynamically find all available models that support generation
+    try:
+        all_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+        # Prioritize 1.5 Flash (cheaper/faster), then Pro
+        flash_models = sorted([m for m in all_models if "1.5-flash" in m])
+        pro_models = sorted([m for m in all_models if "1.5-pro" in m])
+        others = sorted([m for m in all_models if m not in flash_models and m not in pro_models])
+
+        models_to_try = flash_models + pro_models + others
+        logger.info(f"Discovery found {len(models_to_try)} candidate models: {models_to_try}")
+    except Exception as e:
+        logger.warning(f"Model discovery failed: {e}. Using hardcoded fallback list.")
+        models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro"]
+
     last_err = None
 
     system_instruction = """
@@ -80,6 +92,9 @@ def generate_script(news):
     """
 
     for model_name in models_to_try:
+        # Skip experimental or older models that might be flaky
+        if any(x in model_name for x in ["vision", "embedding", "aqa"]): continue
+
         try:
             logger.info(f"Attempting with model: {model_name}")
             model = genai.GenerativeModel(model_name=model_name)
@@ -95,7 +110,7 @@ def generate_script(news):
             last_err = e
             time.sleep(2)
 
-    raise Exception(f"All AI models failed. Last error: {last_err}")
+    raise Exception(f"All {len(models_to_try)} discovered AI models failed. Last error: {last_err}")
 
 def synthesize(script):
     logger.info("Synthesizing audio with Cloud TTS...")
