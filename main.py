@@ -13,7 +13,7 @@ from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import secretmanager
 
 # --- CONFIG & LOGGING ---
-VERSION = "8.2-ROBUST-CONFIG"
+VERSION = "8.3-NEWS-FIX"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -45,26 +45,43 @@ def fetch_news():
         logger.error("NEWS_API_KEY missing!")
         return "FEHLER: NEWS_API_KEY nicht konfiguriert."
 
-    categories = ["general", "business", "technology", "science"]
+    # NewsAPI often blocks Cloud Run if no User-Agent is set
+    headers = {"User-Agent": "MorgenpostBriefing/1.0 (GoogleCloudRun; Serverless)"}
+
+    categories = ["general", "business", "technology"]
     all_articles = []
 
     for cat in categories:
         try:
+            # Try German news first
             url = f"https://newsapi.org/v2/top-headlines?country=de&category={cat}&apiKey={api_key}"
-            r = requests.get(url, timeout=10)
+            r = requests.get(url, headers=headers, timeout=10)
             data = r.json()
+
             if data.get("status") == "error":
                 logger.error(f"NewsAPI Error ({cat}): {data.get('message')}")
                 continue
 
             articles = data.get("articles", [])
+
+            # Fallback to English if German is empty
+            if not articles:
+                logger.info(f"No articles for {cat} in DE, trying global...")
+                url = f"https://newsapi.org/v2/top-headlines?language=en&category={cat}&apiKey={api_key}"
+                r = requests.get(url, headers=headers, timeout=10)
+                data = r.json()
+                articles = data.get("articles", [])
+
             logger.info(f"Fetched {len(articles)} articles for {cat}")
             for a in articles[:5]:
-                all_articles.append(f"[{cat.upper()}] {a['title']}: {a.get('description', '')}")
+                title = a.get('title', 'Kein Titel')
+                desc = a.get('description', 'Keine Beschreibung')
+                all_articles.append(f"[{cat.upper()}] {title}: {desc}")
         except Exception as e:
             logger.warning(f"Failed category {cat}: {e}")
 
     if not all_articles:
+        logger.error("All categories empty! Check NewsAPI Key or User-Agent.")
         return "Keine aktuellen Nachrichten gefunden."
     return "\n".join(all_articles)
 
@@ -75,21 +92,24 @@ def generate_briefing(news_content):
     regions = ["us-central1", "europe-west1", "europe-west3"]
     models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
 
+    # Check for empty content locally to avoid AI confusion
+    if "Keine aktuellen Nachrichten gefunden" in news_content or len(news_content) < 20:
+        return "Guten Morgen! Heute konnten leider keine aktuellen Nachrichten abgerufen werden. Wir hoffen, dich morgen wieder mit News versorgen zu können."
+
     system_instruction = """
-    Du bist ein Redakteur für das tägliche "Morgenpost" Briefing.
-    Deine Aufgabe ist es, die bereitgestellten Nachrichten zu analysieren und eine strukturierte, leicht lesbare Zusammenfassung zu erstellen.
+    Du bist ein professioneller Nachrichten-Redakteur.
+    DEINE AUFGABE: Erstelle ein informatives E-Mail Briefing basierend auf den untenstehenden Daten.
 
-    WICHTIG: Wenn die 'News-Daten' leer sind oder sagen "Keine aktuellen Nachrichten gefunden", dann erstelle eine freundliche Nachricht, dass heute leider keine News verfügbar sind. Frage NICHT nach neuen Daten, sondern schließe das Briefing ab.
+    REGELN:
+    1. Antworte AUSSCHLIESSLICH mit dem fertigen Briefing-Text.
+    2. Keine Einleitungen wie "Okay, ich bin bereit" oder "Hier ist das Briefing".
+    3. Sprache: Deutsch.
+    4. Nutze Markdown (Überschriften, Listen).
 
-    Sprache: Deutsch.
-    Tonfall: Professionell, informativ und prägnant.
-
-    Struktur:
-    1. Kurze Begrüßung.
-    2. Die wichtigsten 3-5 Schlagzeilen mit kurzer Einordnung.
-    3. Ein kurzer Ausblick/Fazit.
-
-    Nutze Markdown für die Formatierung (Überschriften, Aufzählungszeichen).
+    STRUKTUR:
+    - Begrüßung
+    - Top Schlagzeilen (3-5 Stück mit 2-3 Sätzen Analyse)
+    - Ein inspirierendes Fazit
     """
 
     for region in regions:
