@@ -117,15 +117,25 @@ def main():
         # 3. Deliver via Email
         sg_key = get_secret("SENDGRID_API_KEY")
         if sg_key:
-            sg = SendGridAPIClient(sg_key)
-            mail = Mail(
-                from_email=SENDER_EMAIL,
-                to_emails=RECIPIENT_EMAIL,
-                subject=f"Dein Morgen-Briefing ({datetime.now().strftime('%d.%m.%Y')})",
-                plain_text_content=briefing_text
-            )
-            sg.send(mail)
-            logger.info("Email sent successfully.")
+            try:
+                sg = SendGridAPIClient(sg_key)
+                mail = Mail(
+                    from_email=SENDER_EMAIL,
+                    to_emails=RECIPIENT_EMAIL,
+                    subject=f"Dein Morgen-Briefing ({datetime.now().strftime('%d.%m.%Y')})",
+                    plain_text_content=briefing_text
+                )
+                sg.send(mail)
+                logger.info("Email sent successfully.")
+            except Exception as sg_err:
+                if "403" in str(sg_err):
+                    logger.error("SENDGRID ERROR 403 (Forbidden): Dies liegt meist an einer fehlenden 'Sender Authentication'.")
+                    logger.error(f"Bitte stelle sicher, dass '{SENDER_EMAIL}' in deinem SendGrid Account als 'Single Sender' verifiziert ist.")
+                elif "401" in str(sg_err):
+                    logger.error("SENDGRID ERROR 401 (Unauthorized): Der API Key ist ungültig oder hat keine Berechtigung.")
+                else:
+                    logger.error(f"SendGrid Error: {sg_err}")
+                # We don't want to crash the whole job if only the mail fails, but we log it clearly
         else:
             logger.error("SENDGRID_API_KEY missing. Printing briefing to logs:")
             print(briefing_text)
