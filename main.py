@@ -13,13 +13,14 @@ from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import secretmanager
 
 # --- CONFIG & LOGGING ---
-VERSION = "8.0-GMAIL-SMTP"
+VERSION = "8.1-DEBUG-SMTP"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 PROJECT_ID = os.getenv("GCP_PROJECT")
-RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
-SENDER_EMAIL = os.getenv("SENDER_EMAIL") # This should be your Gmail address
+# Ensure variables are clean of any accidental spaces
+RECIPIENT_EMAIL = str(os.getenv("RECIPIENT_EMAIL", "")).strip()
+SENDER_EMAIL = str(os.getenv("SENDER_EMAIL", "")).strip()
 
 # --- UTILS ---
 def get_secret(name):
@@ -105,8 +106,13 @@ def send_gmail(subject, body):
     password = get_secret("GMAIL_APP_PASSWORD")
 
     if not password:
-        logger.error("GMAIL_APP_PASSWORD missing in Secret Manager.")
+        logger.error("DEBUG: GMAIL_APP_PASSWORD missing in Secret Manager.")
         return False
+
+    # Diagnostics
+    logger.info(f"DEBUG: Sender Email is: '{SENDER_EMAIL}'")
+    logger.info(f"DEBUG: Recipient Email is: '{RECIPIENT_EMAIL}'")
+    logger.info(f"DEBUG: Password length is: {len(password)} characters (Expected: 16)")
 
     try:
         msg = MIMEMultipart()
@@ -115,7 +121,11 @@ def send_gmail(subject, body):
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+        # Trying Port 587 with STARTTLS (often more robust in Cloud environments)
+        logger.info("Connecting to smtp.gmail.com:587...")
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.starttls()
+            logger.info(f"Attempting login for {SENDER_EMAIL}...")
             server.login(SENDER_EMAIL, password)
             server.send_message(msg)
 
@@ -123,6 +133,8 @@ def send_gmail(subject, body):
         return True
     except Exception as e:
         logger.error(f"Gmail SMTP Error: {e}")
+        if "535" in str(e):
+            logger.error("TIPP: Der Fehler 535 bedeutet fast immer, dass entweder die SENDER_EMAIL falsch geschrieben ist oder das App-Passwort nicht zum Konto gehört.")
         return False
 
 # --- MAIN EXECUTION ---
