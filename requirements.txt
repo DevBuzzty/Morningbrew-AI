@@ -2,3 +2,4 @@ google-cloud-aiplatform>=1.59.0
 google-cloud-secret-manager>=2.20.0
 requests>=2.31.0
 python-dotenv>=1.0.1
+Pillow>=10.0.0

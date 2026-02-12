@@ -51,8 +51,8 @@ gcloud builds submit --tag $IMAGE_URL --project $PROJECT_ID
 gcloud run jobs deploy $JOB_NAME --image $IMAGE_URL --region $REGION --project $PROJECT_ID `
     --service-account "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" `
     --set-env-vars "GCP_PROJECT=$PROJECT_ID,RECIPIENT_EMAIL=$RECIPIENT_EMAIL,SENDER_EMAIL=$SENDER_EMAIL" `
-    --cpu=1 --memory=512Mi `
-    --task-timeout=600s
+    --cpu=1 --memory=1Gi `
+    --task-timeout=900s
 
 Write-Host "Creating Scheduler..." -ForegroundColor Yellow
 gcloud scheduler jobs delete ${JOB_NAME}-trigger --location $REGION --project $PROJECT_ID --quiet 2>$null
