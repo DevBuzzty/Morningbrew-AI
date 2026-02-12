@@ -13,13 +13,17 @@ from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import secretmanager
 
 # --- CONFIG & LOGGING ---
-VERSION = "8.1-DEBUG-SMTP"
+VERSION = "8.2-ROBUST-CONFIG"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 PROJECT_ID = os.getenv("GCP_PROJECT")
-# Ensure variables are clean of any accidental spaces
-RECIPIENT_EMAIL = str(os.getenv("RECIPIENT_EMAIL", "")).strip()
+# Ensure variables are clean and filter out defaults
+RECIPIENT_RAW = str(os.getenv("RECIPIENT_EMAIL", "")).strip()
+# Automatically remove "your-email@example.com" or "s.f.falser@example.com" if user forgot to change it
+RECIPIENT_LIST = [e.strip() for e in RECIPIENT_RAW.split(",") if "example.com" not in e and e.strip()]
+RECIPIENT_EMAIL = ",".join(RECIPIENT_LIST)
+
 SENDER_EMAIL = str(os.getenv("SENDER_EMAIL", "")).strip()
 
 # --- UTILS ---
@@ -37,7 +41,9 @@ def get_secret(name):
 def fetch_news():
     logger.info("Step 1: Fetching News Headlines...")
     api_key = get_secret("NEWS_API_KEY")
-    if not api_key: return "Keine aktuellen Nachrichten gefunden."
+    if not api_key:
+        logger.error("NEWS_API_KEY missing!")
+        return "FEHLER: NEWS_API_KEY nicht konfiguriert."
 
     categories = ["general", "business", "technology", "science"]
     all_articles = []
@@ -46,12 +52,20 @@ def fetch_news():
         try:
             url = f"https://newsapi.org/v2/top-headlines?country=de&category={cat}&apiKey={api_key}"
             r = requests.get(url, timeout=10)
-            articles = r.json().get("articles", [])[:5]
-            for a in articles:
+            data = r.json()
+            if data.get("status") == "error":
+                logger.error(f"NewsAPI Error ({cat}): {data.get('message')}")
+                continue
+
+            articles = data.get("articles", [])
+            logger.info(f"Fetched {len(articles)} articles for {cat}")
+            for a in articles[:5]:
                 all_articles.append(f"[{cat.upper()}] {a['title']}: {a.get('description', '')}")
         except Exception as e:
             logger.warning(f"Failed category {cat}: {e}")
 
+    if not all_articles:
+        return "Keine aktuellen Nachrichten gefunden."
     return "\n".join(all_articles)
 
 # --- STEP 2: AI NEWS PROCESSING ---
@@ -64,6 +78,8 @@ def generate_briefing(news_content):
     system_instruction = """
     Du bist ein Redakteur für das tägliche "Morgenpost" Briefing.
     Deine Aufgabe ist es, die bereitgestellten Nachrichten zu analysieren und eine strukturierte, leicht lesbare Zusammenfassung zu erstellen.
+
+    WICHTIG: Wenn die 'News-Daten' leer sind oder sagen "Keine aktuellen Nachrichten gefunden", dann erstelle eine freundliche Nachricht, dass heute leider keine News verfügbar sind. Frage NICHT nach neuen Daten, sondern schließe das Briefing ab.
 
     Sprache: Deutsch.
     Tonfall: Professionell, informativ und prägnant.
