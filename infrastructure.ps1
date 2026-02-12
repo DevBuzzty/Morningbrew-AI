@@ -1,11 +1,11 @@
 # Configuration - CHANGE THESE
 $RECIPIENT_EMAIL = "your-email@example.com"
-$SENDER_EMAIL = "your-verified-sender@example.com"
+$SENDER_EMAIL = "your-gmail-address@gmail.com"
 
 # System Config
 $PROJECT_ID = gcloud config get-value project
 $REGION = "europe-west3"
-$SA_NAME = "morgenpost-text-sa"
+$SA_NAME = "morgenpost-gmail-sa"
 $JOB_NAME = "daily-text-briefing"
 
 if (-not $PROJECT_ID) {
@@ -13,7 +13,7 @@ if (-not $PROJECT_ID) {
     exit
 }
 
-Write-Host "Starting Deployment for Text Briefing: $PROJECT_ID" -ForegroundColor Cyan
+Write-Host "Starting Deployment for Gmail Edition: $PROJECT_ID" -ForegroundColor Cyan
 
 Write-Host "Enabling APIs..." -ForegroundColor Yellow
 gcloud services enable --project $PROJECT_ID `
@@ -28,7 +28,7 @@ Write-Host "Waiting 60s..." -ForegroundColor Yellow
 Start-Sleep -Seconds 60
 
 Write-Host "Creating Service Account..." -ForegroundColor Yellow
-gcloud iam service-accounts create $SA_NAME --display-name="Morgenpost Text SA" --project $PROJECT_ID
+gcloud iam service-accounts create $SA_NAME --display-name="Morgenpost Gmail SA" --project $PROJECT_ID
 
 Write-Host "Granting Permissions..." -ForegroundColor Yellow
 $SA_EMAIL = "serviceAccount:${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -39,12 +39,12 @@ foreach ($ROLE in $ROLES) {
 
 Write-Host "Creating Secrets..." -ForegroundColor Yellow
 gcloud secrets create NEWS_API_KEY --project $PROJECT_ID
-gcloud secrets create SENDGRID_API_KEY --project $PROJECT_ID
+gcloud secrets create GMAIL_APP_PASSWORD --project $PROJECT_ID
 
 Write-Host "Building and Deploying..." -ForegroundColor Yellow
 gcloud artifacts repositories create morgenpost-repo --repository-format=docker --location=$REGION --project $PROJECT_ID
 $TAG = [Math]::Floor([decimal](Get-Date -UFormat %s))
-$IMAGE_URL = "${REGION}-docker.pkg.dev/${PROJECT_ID}/morgenpost-repo/text-app:$TAG"
+$IMAGE_URL = "${REGION}-docker.pkg.dev/${PROJECT_ID}/morgenpost-repo/gmail-app:$TAG"
 gcloud builds submit --tag $IMAGE_URL --project $PROJECT_ID
 
 # Deploy Job
@@ -60,4 +60,5 @@ gcloud scheduler jobs create http ${JOB_NAME}-trigger --location $REGION --proje
     --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/${JOB_NAME}:run" `
     --http-method POST --oauth-service-account-email "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-Write-Host "Done! Text Briefing Deployment successful." -ForegroundColor Green
+Write-Host "Done! Gmail Edition Deployment successful." -ForegroundColor Green
+Write-Host "WICHTIG: Erstelle ein Gmail App-Passwort und hinterlege es im Secret Manager als 'GMAIL_APP_PASSWORD'." -ForegroundColor Yellow

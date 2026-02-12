@@ -3,22 +3,23 @@ import json
 import logging
 import requests
 import time
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig
 from google.cloud import secretmanager
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
 
 # --- CONFIG & LOGGING ---
-VERSION = "7.0-TEXT-ONLY"
+VERSION = "8.0-GMAIL-SMTP"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 PROJECT_ID = os.getenv("GCP_PROJECT")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
-SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+SENDER_EMAIL = os.getenv("SENDER_EMAIL") # This should be your Gmail address
 
 # --- UTILS ---
 def get_secret(name):
@@ -98,10 +99,36 @@ def generate_briefing(news_content):
 
     raise Exception("Model discovery failed completely.")
 
+# --- STEP 3: EMAIL DELIVERY (GMAIL SMTP) ---
+def send_gmail(subject, body):
+    logger.info("Step 3: Delivering via Gmail SMTP...")
+    password = get_secret("GMAIL_APP_PASSWORD")
+
+    if not password:
+        logger.error("GMAIL_APP_PASSWORD missing in Secret Manager.")
+        return False
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = RECIPIENT_EMAIL
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(SENDER_EMAIL, password)
+            server.send_message(msg)
+
+        logger.info("Email sent successfully via Gmail.")
+        return True
+    except Exception as e:
+        logger.error(f"Gmail SMTP Error: {e}")
+        return False
+
 # --- MAIN EXECUTION ---
 def main():
     start_time = time.time()
-    logger.info(f"--- Morgenpost Text Briefing v{VERSION} Started ---")
+    logger.info(f"--- Morgenpost Gmail Edition v{VERSION} Started ---")
 
     if not all([PROJECT_ID, RECIPIENT_EMAIL, SENDER_EMAIL]):
         logger.error("Environment variables missing!")
@@ -114,31 +141,12 @@ def main():
         # 2. Process with AI
         briefing_text = generate_briefing(news)
 
-        # 3. Deliver via Email
-        sg_key = get_secret("SENDGRID_API_KEY")
-        if sg_key:
-            try:
-                sg = SendGridAPIClient(sg_key)
-                mail = Mail(
-                    from_email=SENDER_EMAIL,
-                    to_emails=RECIPIENT_EMAIL,
-                    subject=f"Dein Morgen-Briefing ({datetime.now().strftime('%d.%m.%Y')})",
-                    plain_text_content=briefing_text
-                )
-                sg.send(mail)
-                logger.info("Email sent successfully.")
-            except Exception as sg_err:
-                if "403" in str(sg_err):
-                    logger.error("SENDGRID ERROR 403 (Forbidden): Dies liegt meist an einer fehlenden 'Sender Authentication'.")
-                    logger.error(f"Bitte stelle sicher, dass '{SENDER_EMAIL}' in deinem SendGrid Account als 'Single Sender' verifiziert ist.")
-                elif "401" in str(sg_err):
-                    logger.error("SENDGRID ERROR 401 (Unauthorized): Der API Key ist ungültig oder hat keine Berechtigung.")
-                else:
-                    logger.error(f"SendGrid Error: {sg_err}")
-                # We don't want to crash the whole job if only the mail fails, but we log it clearly
-        else:
-            logger.error("SENDGRID_API_KEY missing. Printing briefing to logs:")
-            print(briefing_text)
+        # 3. Deliver
+        subject = f"Dein Morgen-Briefing ({datetime.now().strftime('%d.%m.%Y')})"
+        success = send_gmail(subject, briefing_text)
+
+        if not success:
+            logger.error("Failed to deliver briefing. Check logs for SMTP errors.")
 
         duration = time.time() - start_time
         logger.info(f"Total processing time: {duration:.2f}s")

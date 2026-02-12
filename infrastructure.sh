@@ -1,12 +1,12 @@
 #!/bin/bash
 # Configuration - CHANGE THESE
 RECIPIENT_EMAIL="your-email@example.com"
-SENDER_EMAIL="your-verified-sender@example.com"
+SENDER_EMAIL="your-gmail-address@gmail.com"
 
 # System Config
 PROJECT_ID=$(gcloud config get-value project)
 REGION="europe-west3"
-SA_NAME="morgenpost-text-sa"
+SA_NAME="morgenpost-gmail-sa"
 JOB_NAME="daily-text-briefing"
 
 if [ -z "$PROJECT_ID" ]; then
@@ -14,7 +14,7 @@ if [ -z "$PROJECT_ID" ]; then
     exit 1
 fi
 
-echo "Starting Deployment for Text Briefing: $PROJECT_ID"
+echo "Starting Deployment for Gmail Edition: $PROJECT_ID"
 
 echo "Enabling necessary APIs..."
 gcloud services enable --project $PROJECT_ID \
@@ -29,7 +29,7 @@ echo "Waiting 60 seconds for API synchronization..."
 sleep 60
 
 echo "Creating Service Account..."
-gcloud iam service-accounts create $SA_NAME --display-name="Morgenpost Text SA" --project $PROJECT_ID || true
+gcloud iam service-accounts create $SA_NAME --display-name="Morgenpost Gmail SA" --project $PROJECT_ID || true
 
 echo "Granting Permissions..."
 SA_EMAIL="serviceAccount:${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -44,15 +44,15 @@ done
 
 echo "Creating Secrets (if they don't exist)..."
 gcloud secrets create NEWS_API_KEY --project $PROJECT_ID || true
-gcloud secrets create SENDGRID_API_KEY --project $PROJECT_ID || true
+gcloud secrets create GMAIL_APP_PASSWORD --project $PROJECT_ID || true
 
 echo "Building and Deploying Image..."
 gcloud artifacts repositories create morgenpost-repo --repository-format=docker --location=$REGION --project $PROJECT_ID || true
 TAG=$(date +%Y%m%d%H%M%S)
-IMAGE_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/morgenpost-repo/text-app:$TAG"
+IMAGE_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/morgenpost-repo/gmail-app:$TAG"
 gcloud builds submit --tag $IMAGE_URL --project $PROJECT_ID
 
-# Deploy Job with minimal resources
+# Deploy Job
 gcloud run jobs deploy $JOB_NAME --image $IMAGE_URL --region $REGION --project $PROJECT_ID \
     --service-account "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" \
     --set-env-vars "GCP_PROJECT=$PROJECT_ID,RECIPIENT_EMAIL=$RECIPIENT_EMAIL,SENDER_EMAIL=$SENDER_EMAIL" \
@@ -65,4 +65,5 @@ gcloud scheduler jobs create http ${JOB_NAME}-trigger --location $REGION --proje
     --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/${JOB_NAME}:run" \
     --http-method POST --oauth-service-account-email "${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-echo "Done! Text Briefing Deployment successful."
+echo "Done! Gmail Edition Deployment successful."
+echo "WICHTIG: Erstelle ein Gmail App-Passwort und hinterlege es im Secret Manager als 'GMAIL_APP_PASSWORD'."
